@@ -16,11 +16,15 @@
         |
         v
 class, confidence, b_box, 좌표 .....
+현재 dectection 결과 저장
         |
         v
       [구현]
-검사 상태 관리, 결과 확정, 
-상태 결정, 검사 결과 데이터 생성
+PCB 존재 판단
+1초 검사
+정상 조건 비교
+검사 상태 관리 및 결과 확정
+상태 결정, 검사 결과 데이터 생성 및 저장
       [구현]
         |
         v
@@ -30,16 +34,47 @@ class, confidence, b_box, 좌표 .....
 ## 인터페이스
 
 ### YOLO -> ME  
-    result = FALE  
-    reason = FALE 사유(pin_broken or register missing, capasiter missing.....)  
-    bounding box = 받기  
+     함수 호출
+     get_detections() 
+     return type : tuple
+     순서 : class,  detail, object_box, bounding_box
 
 ### ME -> UI
-    함수로해서 리턴할 수 있게 넘겨주기  
-    리턴 값은 리스트로 정상 불량, 불량 사유, 박스, 체크 개수
-    UI담당자에게 
 
-## 구현 알고리즘
+    UI 담당자 사용 함수
+    get_inspection_result()
+    반환 값 튜플
+    {
+          state,
+          result,
+          message,
+          details,
+          bounding_box,
+          check_number
+    }
+
+반환값
+| 항목 | 의미 |
+| --- | --- |
+| state | 현재 검사 상태 |
+| result | 최종 정상 / 불량 결과 |
+| message | 넘겨줄 메시지 |
+| details | 불량 원인 |
+| o_box | 오브젝트 박스(측정PCB박스) |
+| b_box | 비정상 검출 박스(측정PCB박스) |
+| check_number | 총 측정한 개수 |
+
+| 목록 | 정상 | 비정상 | 미감지 | 검사중 |
+| --- | --- | --- | --- | --- |
+| state | PASS | FAIL | MISSING | INSPECTING |
+| result | NORMAL | DEEFECT | NULL | NULL |
+| message | PASS | FAIL | MISSING | INSPECTING |
+| details | NULL | FAIL | NULL | NULL |
+| object_box | o_box | o_box | NULL | o_box |
+| bounding_box | b_box | b_box | NULL | b_box |
+| check_number | check_num | check_num | check_num | check_num |
+
+## 구조
 
 ```
 프로그램 시작
