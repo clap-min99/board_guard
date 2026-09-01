@@ -4,9 +4,6 @@ import time
 import cv2
 from threading import Thread, Condition, Lock
 
-_mock_check_number = 0
-_mock_lock = Lock()
-
 def major_vote(): # 여러 프레임 결과 확정 함수
 
     return 0
@@ -14,80 +11,39 @@ def major_vote(): # 여러 프레임 결과 확정 함수
 def normal_compare(): # 정상 조건 확인 함수
     return 0
 
-def get_detections(): # 호출 할 함수
-    answer = {"class", "detail", "bounding_box"}
-
+def get_detections(): # 내가 호출 할 함수
+    #answer = {"class", "detail", "bounding_box"}
+    answer = ("0", None, [10,10,5,5])
+    # 0이 멀쩡한놈 1이 비정상인놈
     return answer
 
-def get_inspection_result(): #호출 시켜줄 함수
-    """실제 모델 연결 전 화면 테스트용 랜덤 검사 결과."""
-    global _mock_check_number
-
-    time.sleep(0.7)
-    state = random.choices(
-        ["PASS", "FAIL", "MISSING"],
-        weights=[60, 30, 10],
-        k=1,
-    )[0]
-
-    with _mock_lock:
-        if state in ("PASS", "FAIL"):
-            _mock_check_number += 1
-        check_number = _mock_check_number
-
-    pcb_width = random.randint(320, 520)
-    pcb_height = random.randint(220, 380)
-    pcb_x = random.randint(0, 640 - pcb_width)
-    pcb_y = random.randint(0, 480 - pcb_height)
-    pcb_box = [pcb_x, pcb_y, pcb_width, pcb_height]
-
-    if state == "PASS":
-        return {
-            "state": "PASS",
-            "result": "NORMAL",
-            "message": "PASS",
-            "details": None,
-            "pcb_box": pcb_box,
-            "anomaly_box": None,
-            "check_number": check_number,
-        }
-
-    if state == "FAIL":
-        defect = random.choice(["파손", "오염", "납땜 불량", "기타 이상"])
-        anomaly_width = random.randint(30, min(100, pcb_width))
-        anomaly_height = random.randint(30, min(100, pcb_height))
-        anomaly_x = random.randint(pcb_x, pcb_x + pcb_width - anomaly_width)
-        anomaly_y = random.randint(pcb_y, pcb_y + pcb_height - anomaly_height)
-
-        return {
-            "state": "FAIL",
-            "result": "DEFECT",
-            "message": "FAIL",
-            "details": defect,
-            "pcb_box": pcb_box,
-            "anomaly_box": [
-                anomaly_x,
-                anomaly_y,
-                anomaly_width,
-                anomaly_height,
-            ],
-            "check_number": check_number,
-        }
-
-    return {
-        "state": "MISSING",
-        "result": None,
-        "message": "MISSING",
-        "details": None,
-        "pcb_box": None,
-        "anomaly_box": None,
-        "check_number": check_number,
+def get_inspection_result(temp_list): #UI에서 호출 할 함수
+    
+    # answer = {
+    #     "state": "PASS",
+    #     "result": "NORMAL",
+    #     "message": "PASS",
+    #     "details": None,
+    #     "bounding_box": [10, 10, 5, 5]
+    # }
+    state, result, message, details, bbox, chk_num = temp_list
+    
+    answer = {
+        "state": state,
+        "result": result,
+        "message": message,
+        "details": details,
+        "bounding_box": bbox,
+        "check_number": chk_num
     }
+
+    return answer
 
 def check_loop(): # 추론결과 판단 함수
     global _l_class
     global _l_detail
     global _l_bounding_box
+    global _l_temp
 
     _l_cap = cv2.VideoCapture(0)
 
@@ -97,9 +53,53 @@ def check_loop(): # 추론결과 판단 함수
     check_time = time.time()
 
     try:
-        while _l_cap.isOpened():
-            pass
-    except Exception as e:
-        raise RuntimeError(f"추론 처리 중 오류: {e}") from e
+        while _l_cap.isOpended():
+            # 여기서부터 시작임 
+
+            # PCB 존재 판단
+            _l_class, _l_detail, _l_bounding_box = get_detections()
+
+            # 상태를 가지고 있어야함 PASS, FAIL, MISSING, INSPECTING
+            
+            # 여러 프레임 받아서 결과값 확정 처리하기 매 초마다 갱신하는거임. 
+
+            # 화면에 아무것도 안잡혀서 빈 리스트가 넘어올떄 
+            if _l_class == None:
+                _l_temp = ["MISSING", None, "MISSING", None, None, check_number]
+
+            # 뭔가 넘어왔음.
+            else :
+                # 이게 클래스만 판단하는게 맞나? 클래스만판단해서 그 클래스랑 같이온 값넘겨저야됨
+                #아래 넘겨줄때 손으로 직접작성해서 넘겨주면 안된다.
+                one_history.append(_l_class)
+            
+            if state_vote(one_history) == 0: #정상인 상황 가장 많은거 여기다 넣기.
+                check_number += 1
+                _l_temp = ["PASS", "NORMAL", "PASS", None, _l_bounding_box, check_number]
+
+            elif state_vote(one_history) == 1: #비정상인 상황
+                check_number += 1
+                _l_temp = ["FAIL", "DEEFECT", "FAIL", "FAIL", _l_bounding_box, check_number]
+
+            elif state_vote(one_history) == "INSPECTING":
+                _l_temp = ["INSPECTING", None, "INSPECTING", None, _l_bounding_box, check_number]
+
+            else:
+                _l_temp = ["MISSING", None, "MISSING", None, None, check_number]
+
+
+
+            # 검사 상태 관리 및 결과 확정 / get_inspection_result(_l_temp) 호출하면 원하는 answer나오게하기
+
     finally:
         _l_cap.release()
+
+
+#경기 시자아아아아아아아악! 하겠습니다!!
+if __name__ == "__main__":
+
+    try:
+        check_loop()
+
+    except KeyboardInterrupt:
+        print("\\n end")
