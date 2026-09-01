@@ -60,7 +60,6 @@ PCB 존재 판단
 | result | 최종 정상 / 불량 결과 |
 | message | 넘겨줄 메시지 |
 | details | 불량 원인 |
-| o_box | 오브젝트 박스(측정PCB박스) |
 | b_box | 비정상 검출 박스(측정PCB박스) |
 | check_number | 총 측정한 개수 |
 
@@ -70,7 +69,6 @@ PCB 존재 판단
 | result | NORMAL | DEEFECT | NULL | NULL |
 | message | PASS | FAIL | MISSING | INSPECTING |
 | details | NULL | FAIL | NULL | NULL |
-| object_box | o_box | o_box | NULL | o_box |
 | bounding_box | b_box | b_box | NULL | b_box |
 | check_number | check_num | check_num | check_num | check_num |
 
