@@ -10,19 +10,16 @@ two_history = []
 check_number = 0
 
 # 최근 60장의 판정 결과 투표 매번 투표하고나면 투표지는 싹다 지운다
-def state_vote(one_history):
-    if len(one_history) < 60:
+def state_vote(history):
+    if len(history) < 60:
         return "INSPECTING"
     else:
-        count = Counter(one_history)
+        count = Counter(history)
         answer = count.most_common(1)[0][0]
-        one_history.clear()
+        history.clear()
     return answer
 
-def normal_compare(): # 정상 조건 확인 함수
-    return 0
-
-def get_detections(): # 내가 호출 할 함수
+def get_detections(): # 내가 호출 할 함수 임의로 만듬
     #answer = {"class", "detail", "bounding_box"}
     answer = ("0", None, [10,10,5,5])
     # 0이 멀쩡한놈 1이 비정상인놈
@@ -55,6 +52,8 @@ def check_loop(): # 추론결과 판단 함수
     global _l_detail
     global _l_bounding_box
     global _l_temp
+    global one_history
+    global check_number
 
     _l_cap = cv2.VideoCapture(0)
 
@@ -64,11 +63,11 @@ def check_loop(): # 추론결과 판단 함수
     check_time = time.time()
 
     try:
-        while _l_cap.isOpended():
+        while _l_cap.isOpened():
             # 여기서부터 시작임 
 
             # PCB 존재 판단
-            _l_class, _l_detail, _l_bounding_box = get_detections()
+            _l_class, _l_detail, _l_bounding_box = get_detections() # 저거 받아다 써야됨
 
             # 상태를 가지고 있어야함 PASS, FAIL, MISSING, INSPECTING
             
@@ -81,7 +80,7 @@ def check_loop(): # 추론결과 판단 함수
             # 뭔가 넘어왔음.
             else :
                 # 이게 클래스만 판단하는게 맞나? 클래스만판단해서 그 클래스랑 같이온 값넘겨저야됨
-                #아래 넘겨줄때 손으로 직접작성해서 넘겨주면 안된다.
+                #아래 넘겨줄때 손으로 직접작성해서 넘겨주면 안된다.?
                 one_history.append(_l_class)
             
             if state_vote(one_history) == 0: #정상인 상황 가장 많은거 여기다 넣기.
@@ -98,9 +97,8 @@ def check_loop(): # 추론결과 판단 함수
             else:
                 _l_temp = ["MISSING", None, "MISSING", None, None, check_number]
 
-
-
             # 검사 상태 관리 및 결과 확정 / get_inspection_result(_l_temp) 호출하면 원하는 answer나오게하기
+            print(get_inspection_result(_l_temp))
 
     finally:
         _l_cap.release()
