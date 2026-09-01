@@ -38,6 +38,7 @@ PCB 존재 판단
      get_detections() 
      return type : tuple
      순서 : class,  detail, object_box, bounding_box
+     class는 0과 1로 들어온다.
 
 ### ME -> UI
 
