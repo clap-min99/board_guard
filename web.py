@@ -1,28 +1,55 @@
 import cv2
 import os
+import time
 import threading
 from flask import Flask, Response, render_template_string, jsonify
-from test import get_inspection_result
+from test import check_loop, get_inspection_result
 
 app = Flask(__name__)
 
 # 핸드폰 카메라
 CAMERA_URL = "http://10.94.184.244:8080/video"
+CAMERA_RETRY_INTERVAL = 2
+CAMERA_MAX_RETRIES = 3
 
-cap = cv2.VideoCapture(CAMERA_URL)
+cap = None
 
-frame = None
+frame = None  # UI와 모델 추론이 함께 사용할 최신 프레임
+camera_error = False
 cnt = 1
 
 
 def camera_thread():
-    global frame
+    global cap, frame, camera_error
+    retry_count = 0
 
     while True:
+        if cap is None or not cap.isOpened():
+            if cap is not None:
+                cap.release()
+            cap = cv2.VideoCapture(CAMERA_URL)
+
+            if not cap.isOpened():
+                retry_count += 1
+                camera_error = retry_count >= CAMERA_MAX_RETRIES
+                frame = None
+                time.sleep(CAMERA_RETRY_INTERVAL)
+                continue
+
         ret, img = cap.read()
 
         if ret:
             frame = img
+            retry_count = 0
+            camera_error = False
+            continue
+
+        # 연결이 끊기면 현재 영상을 비우고 다음 반복에서 재연결한다.
+        retry_count += 1
+        camera_error = retry_count >= CAMERA_MAX_RETRIES
+        frame = None
+        cap.release()
+        time.sleep(CAMERA_RETRY_INTERVAL)
 
 
 threading.Thread(
@@ -38,6 +65,7 @@ inspection_stats = {
 stats_lock = threading.Lock()
 inspection_enabled = threading.Event()
 inspection_enabled.set()
+# test.py의 추론 결과와 UI 통계를 저장한다.
 latest_result = {
     "inspection_id": 0,
     "state": "INSPECTING",
@@ -54,23 +82,31 @@ latest_result = {
 }
 
 
+def get_camera_frame():
+    """UI에 표시되는 IP 카메라의 최신 프레임을 검사 루프에 전달한다."""
+    if frame is None:
+        return None
+    return frame.copy()
+
+
 def inspection_thread():
-    """모델을 계속 실행하고 웹에서 조회할 최신 결과를 보관한다."""
+    """test.py의 최신 모델 결과를 웹 표시 데이터로 동기화한다."""
     global latest_result
+    last_signature = None
 
     while True:
         inspection_enabled.wait()
-
-        with stats_lock:
-            latest_result = {
-                **latest_result,
-                "state": "INSPECTING",
-                "result": None,
-                "message": "INSPECTING",
-                "inspection_enabled": True,
-            }
-
         result = get_inspection_result()
+        signature = (
+            result.get("state"),
+            result.get("check_number"),
+            repr(result.get("bounding_box")),
+            result.get("details"),
+        )
+
+        if signature == last_signature:
+            threading.Event().wait(0.05)
+            continue
 
         with stats_lock:
             if not inspection_enabled.is_set():
@@ -95,10 +131,17 @@ def inspection_thread():
                 "fail_rate": round(fail_rate, 1),
                 "inspection_enabled": True,
             }
+            last_signature = signature
 
-        # mock 결과를 화면에서 확인할 수 있도록 다음 검사 전 잠시 대기한다.
-        threading.Event().wait(1.0)
+        threading.Event().wait(0.05)
 
+
+threading.Thread(
+    target=check_loop,
+    # UI와 동일한 IP 카메라 프레임을 추론에 전달한다.
+    args=(inspection_enabled, get_camera_frame),
+    daemon=True
+).start()
 
 threading.Thread(
     target=inspection_thread,
@@ -168,12 +211,14 @@ def generate_frames():
     while True:
 
         if frame is None:
+            time.sleep(0.05)
             continue
 
         display_frame = frame.copy()
         with stats_lock:
             display_result = dict(latest_result)
 
+        # 최신 추론 박스를 영상 위에 그려서 UI로 전송한다.
         draw_inspection_boxes(display_frame, display_result)
         ret, buffer = cv2.imencode(".jpg", display_frame)
 
@@ -306,6 +351,11 @@ def index():
 
                 case 'STOPPED':
                     resultElement.textContent = '자동검사가 중단되었습니다.';
+                    resultElement.style.color = '#ef5964';
+                    break;
+
+                case 'CAMERA_ERROR':
+                    resultElement.textContent = '카메라 연결에 실패했습니다.';
                     resultElement.style.color = '#ef5964';
                     break;
 
@@ -543,7 +593,16 @@ def video_feed():
 @app.route("/inspection", methods=["GET"])
 def inspection():
     with stats_lock:
-        return jsonify(dict(latest_result))
+        result = dict(latest_result)
+
+    if camera_error:
+        result.update({
+            "state": "CAMERA_ERROR",
+            "result": None,
+            "message": "카메라 연결에 실패했습니다.",
+        })
+
+    return jsonify(result)
 
 
 @app.route("/inspection/stop", methods=["POST"])
