@@ -7,13 +7,17 @@ from collections import Counter
 
 one_history = []
 one_history_detail = []
+one_history_obox = []
 one_history_bbox = []
 two_history = []
 check_number = 0
 
 loop_count = 1
-
 _missing_check = 1          # 한 pcb에 한 판정만 하게 함 1일때 pcb 판독 가능
+
+def saveing_picture():
+    # 고장난 거 사진 찍어서 저장할 용도
+    pass
 
 # 최근 60장의 판정 결과 투표 매번 투표하고나면 투표지는 싹다 지운다
 def state_vote(history):
@@ -40,19 +44,22 @@ def get_inspection_result(temp_list): #UI에서 호출 할 함수
     #     "details": None,
     #     "bounding_box": [10, 10, 5, 5]
     # }
-    state, result, message, details, bbox, chk_num = temp_list
+    state, result, message, details, obox, bbox, chk_num = temp_list
     
     answer = {
         "state": state,
         "result": result,
         "message": message,
         "details": details,
+        "objecting_box": obox,
         "bounding_box": bbox,
         "check_number": chk_num
     }
 
     return answer
 
+
+_l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
 def check_loop(): # 추론결과 판단 함수
     global loop_count
 
@@ -62,14 +69,14 @@ def check_loop(): # 추론결과 판단 함수
     global _l_temp
     global one_history
     global one_history_detail
+    global one_history_obox
     global one_history_bbox
     global check_number
     global _l_state
     global _l_state_detail
     global _l_state_bbox
     global _missing_check
-
-    _l_temp = ["MISSING", None, "MISSING", None, None, check_number]
+    global _l_object_box
 
     _l_cap = cv2.VideoCapture(0)
 
@@ -83,7 +90,7 @@ def check_loop(): # 추론결과 판단 함수
             # 여기서부터 시작임 
 
             # PCB 존재 판단
-            _l_class, _l_detail, _l_bounding_box = get_detections() # 저거 받아다 써야됨
+            _l_class, _l_detail, _l_object_box, _l_bounding_box = get_detections() # 저거 받아다 써야됨
 
             # 상태를 가지고 있어야함 PASS, FAIL, MISSING, INSPECTING
             
@@ -110,23 +117,27 @@ def check_loop(): # 추론결과 판단 함수
                     # 미싱은 앞에서 처리했으니 성공 실패 검사중만 체크하면 됨.
                     one_history.append(_l_class)
                     one_history_detail.append(_l_detail)
+                    one_history_obox.append(_l_object_box)
                     one_history_bbox.append(_l_bounding_box)
+                    
 
                     _l_state = state_vote(one_history)
                     _l_state_detail = state_vote(one_history_detail)
+                    _l_object_box = state_vote(one_history_obox)
                     _l_bounding_box = state_vote(one_history_bbox)
+                    
 
                     print(_l_state)
                     if _l_state == 0: # 정상 검출 됬음.
                         check_number += 1
-                        _l_temp = ["PASS", "NORMAL", "PASS", _l_state_detail, _l_bounding_box, check_number]
+                        _l_temp = ["PASS", "NORMAL", "PASS", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
                     elif _l_state == 1: # 비정상이래요.
                         check_number += 1
-                        _l_temp = ["FAIL", "DEEFECT", "FAIL", _l_state_detail, _l_bounding_box, check_number]
+                        _l_temp = ["FAIL", "DEEFECT", "FAIL", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
                     elif _l_state == "INSPECTING": # 검사중 이래요
-                        _l_temp = ["INSPECTING", None, "INSPECTING", _l_state_detail, _l_bounding_box, check_number]
+                        _l_temp = ["INSPECTING", None, "INSPECTING", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
 
                 else:
                     pass
