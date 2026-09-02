@@ -7,7 +7,6 @@
 
 # 데이터셋 (용량 큼, 각자 촬영 데이터로 대체)
 pcb_dataset/
-*.jpg
 *.jpeg
 *.png
 !docs/**/*.png
