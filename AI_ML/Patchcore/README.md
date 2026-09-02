@@ -37,7 +37,7 @@ Google Drive 공유 폴더에서 아래 두 파일을 받으세요.
 ### 방법 B — 직접 재학습 (데이터셋부터 새로 모을 경우)
 
 1. `capture_dataset.py`로 정상/불량 사진 촬영 (사용법은 스크립트 상단 docstring 참고)
-2. `pcb_anomaly_detection_colab.ipynb`를 Colab에서 열어 `Folder` datamodule에 촬영한 데이터 경로 연결
+2. `patchcore_hs04_front.ipynb`(앞면) 또는 `patchcore_hs04_back.ipynb`(뒷면)를 Colab에서 열어 `Folder` datamodule에 촬영한 데이터 경로 연결
 3. `Patchcore(backbone="resnet18", precision="float16")`로 학습
 4. `engine.export(..., export_type=ExportType.ONNX)`로 `.onnx` 추출
 
@@ -47,7 +47,7 @@ Google Drive 공유 폴더에서 아래 두 파일을 받으세요.
 pip install onnx  # 아직 없으면
 
 trtexec --onnx=model_front.onnx \
-        --saveEngine=model_01.engine \
+        --saveEngine=model_front.engine \
         --fp16 \
         --memPoolSize=workspace:4096MiB \
         --shapes=input:1x3x256x256
@@ -67,8 +67,8 @@ trtexec --onnx=model_back.onnx \
 import onnx.utils
 
 onnx.utils.extract_model(
-    input_path="model_01.onnx",
-    output_path="model_01_no_postproc.onnx",
+    input_path="model_front.onnx",
+    output_path="model_front_no_postproc.onnx",
     input_names=["input"],
     output_names=["pred_score", "anomaly_map"],
 )
@@ -94,10 +94,10 @@ python3 pcb_inspector.py
 - 화면 하단 `FRONT CHECK` / `BACK CHECK` 버튼을 클릭하면 그 모드로 전환되어, **매 프레임 계속** 판정합니다 (같은 버튼 다시 클릭 시 대기 상태).
 - `q`로 종료.
 
-### 실행 전 확인할 설정값 (`pcb_inspector_app.py` 상단)
+### 실행 전 확인할 설정값 (`pcb_inspector.py` 상단)
 
 ```python
-FRONT_ENGINE_PATH = "model_01.engine"
+FRONT_ENGINE_PATH = "model_front.engine"
 BACK_ENGINE_PATH = "model_back.engine"
 EMPTY_REFERENCE_PATH = "empty_reference.jpg"
 CAMERA_URL = "http://<본인 카메라 IP>:8080/video"   # 실행 전 반드시 확인/수정
