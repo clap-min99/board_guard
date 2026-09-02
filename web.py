@@ -1,9 +1,11 @@
 import cv2
 import os
+import sqlite3
 import time
 import threading
 from flask import Flask, Response, render_template_string, jsonify
 from test import check_loop, get_inspection_result
+from database import init_database, save_fail_inspection
 
 app = Flask(__name__)
 
@@ -11,17 +13,24 @@ app = Flask(__name__)
 CAMERA_URL = "http://10.94.184.244:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
+MODEL_NAME = "PCB-YOLOv8"
+DEVICE_NAME = "Jetson Orin Nano"
+
+init_database()
 
 cap = None
 
 frame = None  # UI와 모델 추론이 함께 사용할 최신 프레임
 camera_error = False
+camera_fps = 0.0
 cnt = 1
 
 
 def camera_thread():
-    global cap, frame, camera_error
+    global cap, frame, camera_error, camera_fps
     retry_count = 0
+    fps_frame_count = 0
+    fps_started_at = time.monotonic()
 
     while True:
         if cap is None or not cap.isOpened():
@@ -32,9 +41,13 @@ def camera_thread():
             if not cap.isOpened():
                 retry_count += 1
                 camera_error = retry_count >= CAMERA_MAX_RETRIES
+                camera_fps = 0.0
                 frame = None
                 time.sleep(CAMERA_RETRY_INTERVAL)
                 continue
+
+            fps_frame_count = 0
+            fps_started_at = time.monotonic()
 
         ret, img = cap.read()
 
@@ -42,11 +55,20 @@ def camera_thread():
             frame = img
             retry_count = 0
             camera_error = False
+            fps_frame_count += 1
+            fps_elapsed = time.monotonic() - fps_started_at
+            if fps_elapsed >= 1.0:
+                camera_fps = round(fps_frame_count / fps_elapsed, 1)
+                fps_frame_count = 0
+                fps_started_at = time.monotonic()
             continue
 
         # 연결이 끊기면 현재 영상을 비우고 다음 반복에서 재연결한다.
         retry_count += 1
         camera_error = retry_count >= CAMERA_MAX_RETRIES
+        camera_fps = 0.0
+        fps_frame_count = 0
+        fps_started_at = time.monotonic()
         frame = None
         cap.release()
         time.sleep(CAMERA_RETRY_INTERVAL)
@@ -95,6 +117,7 @@ def inspection_thread():
     last_signature = None
 
     while True:
+        fail_result = None
         inspection_enabled.wait()
         result = get_inspection_result()
         signature = (
@@ -131,7 +154,20 @@ def inspection_thread():
                 "fail_rate": round(fail_rate, 1),
                 "inspection_enabled": True,
             }
+            if result["state"] == "FAIL":
+                fail_result = dict(latest_result)
             last_signature = signature
+
+        if fail_result is not None:
+            try:
+                save_fail_inspection(
+                    fail_result,
+                    get_camera_frame(),
+                    MODEL_NAME,
+                    DEVICE_NAME,
+                )
+            except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+                print(f"FAIL 검사 결과 저장 실패: {error}")
 
         threading.Event().wait(0.05)
 
@@ -284,6 +320,11 @@ def index():
                         <div class="camera-screen">
                             <img src="/video_feed" alt="IP Webcam 영상">
                             <span class="live-badge"><i class="dot"></i>LIVE</span>
+                            <div class="camera-info">
+                                <div><span>FPS</span><strong id="camera-fps">0.0</strong></div>
+                                <div><span>Model</span><strong id="model-name">-</strong></div>
+                                <div><span>Device</span><strong id="device-name">-</strong></div>
+                            </div>
                         </div>
                     </section>
 
@@ -459,6 +500,9 @@ def index():
                     document.getElementById('pass-count').textContent = data.pass_count;
                     document.getElementById('fail-count').textContent = data.fail_count;
                     document.getElementById('fail-rate').textContent = `${data.fail_rate}%`;
+                    document.getElementById('camera-fps').textContent = data.camera_fps.toFixed(1);
+                    document.getElementById('model-name').textContent = data.model_name;
+                    document.getElementById('device-name').textContent = data.device_name;
 
                     if (data.inspection_id > lastInspectionId && data.state !== 'INSPECTING') {
                         updateCharts(data);
@@ -594,6 +638,12 @@ def video_feed():
 def inspection():
     with stats_lock:
         result = dict(latest_result)
+
+    result.update({
+        "camera_fps": camera_fps,
+        "model_name": MODEL_NAME,
+        "device_name": DEVICE_NAME,
+    })
 
     if camera_error:
         result.update({

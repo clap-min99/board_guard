@@ -161,12 +161,43 @@ h1 {
     letter-spacing: 1px;
 }
 
+.camera-info {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    min-width: 210px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    color: #ffffff;
+    background: rgba(8, 12, 27, 0.62);
+    backdrop-filter: blur(4px);
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.camera-info div {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    line-height: 1.8;
+}
+
+.camera-info span {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.camera-info strong {
+    color: #ffffff;
+    font-weight: 600;
+}
+
 .result-panel {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 126px;
-    margin-bottom: 24px;
+    margin-bottom: 19px;
     padding: 20px 30px;
     border-radius: 20px;
     border: 1px solid #d3d9e3;
@@ -183,7 +214,7 @@ h1 {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 24px;
-    margin-bottom: 24px;
+    margin-bottom: 19px;
 }
 
 .chart-card {
