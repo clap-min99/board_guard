@@ -1,3 +1,9 @@
+# ai추론쪽 camera_thread() 함수 안에서 get_detections(img)에서 나온걸
+# moviing_to로 받아서 하나 추론할때마다 판정을 쌓아서 확인하기
+
+
+
+
 import os
 import time
 import cv2
@@ -10,6 +16,7 @@ one_history_detail = []
 one_history_obox = []
 one_history_bbox = []
 two_history = []
+moviing_to = []
 check_number = 0
 
 loop_count = 1
@@ -78,15 +85,8 @@ def check_loop(): # 추론결과 판단 함수
     global _missing_check
     global _l_object_box
 
-    _l_cap = cv2.VideoCapture(0)
-
-    if not _l_cap.isOpened():
-        raise RuntimeError("카메라 없따.")
-
-    check_time = time.time()
 
     try:
-        while _l_cap.isOpened():
             # 여기서부터 시작임 
 
             # PCB 존재 판단
@@ -103,12 +103,15 @@ def check_loop(): # 추론결과 판단 함수
             # MISSING -> INSPECTING -> PASS -> MISSING
             #                       -> FAIL ┘
             # 화면에 아무것도 안잡혀서 빈 리스트가 넘어올떄 미싱상태임. 
+            # 지금 유사 상태머신임.
             if _l_class == None:
-                _l_temp = ["MISSING", None, "MISSING", None, None, check_number]
+                _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
                 one_history.clear()
                 one_history_detail.clear()
                 one_history_bbox.clear()
+                one_history_obox.clear()
                 _missing_check = 1
+
 
             # 뭔가 넘어왔음.
             else :
@@ -128,20 +131,19 @@ def check_loop(): # 추론결과 판단 함수
                     
 
                     print(_l_state)
-                    if _l_state == 0: # 정상 검출 됬음.
+                    if _l_state == "normal": # 정상 검출 됬음.
                         check_number += 1
-                        _l_temp = ["PASS", "NORMAL", "PASS", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
+                        _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
-                    elif _l_state == 1: # 비정상이래요.
+                    elif _l_state == "defect": # 비정상이래요.
                         check_number += 1
-                        _l_temp = ["FAIL", "DEEFECT", "FAIL", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
+                        _l_temp = ["FAIL", "DEEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
                     elif _l_state == "INSPECTING": # 검사중 이래요
-                        _l_temp = ["INSPECTING", None, "INSPECTING", _l_state_detail, _l_object_box, _l_bounding_box, check_number]
+                        _l_temp = ["INSPECTING", None, "INSPECTING", _l_detail, _l_object_box, _l_bounding_box, check_number]
 
                 else:
                     pass
-
 
                 # 옛날 것
                 # 버그 발생 할 수 있음 한번의 if문 안에서 여러번의 state_vote 호출            
@@ -166,7 +168,7 @@ def check_loop(): # 추론결과 판단 함수
             print(loop_count)
 
     finally:
-        _l_cap.release()
+        pass
 
 
 #경기 시자아아아아아아아악! 하겠습니다!!
