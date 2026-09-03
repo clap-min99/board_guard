@@ -35,6 +35,11 @@ loop_count = 1
 _missing_check = 1    
 _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
 
+# ========================================================
+# 사진 저장할 설정 추가
+# ========================================================
+OUTPUT_DIR = "./inspection_images"
+
 # ============================================================
 # 설정
 # ============================================================
@@ -99,7 +104,7 @@ def get_inspection_result(temp_list): #UI에서 호출 할 함수
 
     return answer
 
-def check_loop(cls, detail, boxes): # 추론결과 판단 함수
+def check_loop(cls, detail, boxes, frame): # 추론결과 판단 함수
     global loop_count
 
     global _l_class
@@ -160,19 +165,32 @@ def check_loop(cls, detail, boxes): # 추론결과 판단 함수
                     print(_l_state)
                     if _l_state == "PASS": # 정상 검출 됬음.
                         check_number += 1
+
+                        FILE_NAME = f"inspection_{check_number}_PASS.jpg"
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        cv2.imwrite(OUTPUT_PATH, frame)
+
                         _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
+                        print(get_inspection_result(_l_temp))
                     elif _l_state == "FAIL": # 비정상이래요.
                         check_number += 1
-                        _l_temp = ["FAIL", "DEEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
+
+                        FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        cv2.imwrite(OUTPUT_PATH, frame)
+                        
+                        _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
+                        print(get_inspection_result(_l_temp))
                     elif _l_state == "INSPECTING": # 검사중 이래요
                         _l_temp = ["INSPECTING", None, "INSPECTING", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        print(get_inspection_result(_l_temp))
                 else:
                     pass
 
             # 검사 상태 관리 및 결과 확정 / get_inspection_result(_l_temp) 호출하면 원하는 answer나오게하기
-            print(get_inspection_result(_l_temp))
+            
 
     finally:
         pass
@@ -368,6 +386,9 @@ def make_mouse_callback(state: AppState, front_rect_holder, back_rect_holder):
 
 
 def main() -> None:
+    #폴더 추가 ==============
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    #=======================
     trt_front = TRTInferenceEngine(FRONT_ENGINE_PATH)
     trt_back = TRTInferenceEngine(BACK_ENGINE_PATH)
     empty_ref_gray = load_empty_reference(EMPTY_REFERENCE_PATH, size=IMG_SIZE)
@@ -408,12 +429,12 @@ def main() -> None:
             if state.mode == "front":
                 cls, detail, boxes = get_detections_front(frame)
                 state.last_result = ("FRONT", cls, detail, boxes)
-                check_loop(cls, detail, boxes)
+                check_loop(cls, detail, boxes, frame)
 
             elif state.mode == "back":
                 cls, detail, boxes = get_detections_back(frame)
                 state.last_result = ("BACK", cls, detail, boxes)
-                check_loop(cls, detail, boxes)
+                check_loop(cls, detail, boxes, frame)
                 
             else:
                 state.last_result = None
