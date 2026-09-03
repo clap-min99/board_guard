@@ -67,7 +67,12 @@ WINDOW_NAME = "PCB Inspector"
 BUTTON_HEIGHT = 60
 BUTTON_MARGIN = 10
 
+# ========================================================
+# 사진 저장할 설정 추가
+# ========================================================
 OUTPUT_DIR = "./inspection_images"
+OUTPUT_DIR_FAIL = "./inspection_images/fail"
+OUTPUT_DIR_PASS = "./inspection_images/pass"
 
 # ============================================================
 # lol
@@ -168,9 +173,9 @@ def _check_loop_unlocked(cls, detail, boxes, frame):
                         check_number += 1
 
                         FILE_NAME = f"inspection_{check_number}_PASS.jpg"
-                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
-                        os.makedirs(OUTPUT_DIR, exist_ok=True)
-                        cv2.imwrite(OUTPUT_PATH, frame)
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_PASS,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR_PASS, exist_ok=True)
+                        saved = cv2.imwrite(OUTPUT_PATH, frame)
 
                         _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
@@ -179,9 +184,9 @@ def _check_loop_unlocked(cls, detail, boxes, frame):
                         check_number += 1
 
                         FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
-                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
-                        os.makedirs(OUTPUT_DIR, exist_ok=True)
-                        cv2.imwrite(OUTPUT_PATH, frame)
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_FAIL,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR_FAIL, exist_ok=True)
+                        saved = cv2.imwrite(OUTPUT_PATH, frame)
                         
                         _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0
