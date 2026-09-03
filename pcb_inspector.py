@@ -39,6 +39,8 @@ _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
 # 사진 저장할 설정 추가
 # ========================================================
 OUTPUT_DIR = "./inspection_images"
+OUTPUT_DIR_FAIL = "./inspection_images/fail"
+OUTPUT_DIR_PASS = "./inspection_images/pass"
 
 # ============================================================
 # 설정
@@ -167,7 +169,7 @@ def check_loop(cls, detail, boxes, frame): # 추론결과 판단 함수
                         check_number += 1
 
                         FILE_NAME = f"inspection_{check_number}_PASS.jpg"
-                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_PASS,FILE_NAME)
                         cv2.imwrite(OUTPUT_PATH, frame)
 
                         _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
@@ -177,7 +179,7 @@ def check_loop(cls, detail, boxes, frame): # 추론결과 판단 함수
                         check_number += 1
 
                         FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
-                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_FAIL,FILE_NAME)
                         cv2.imwrite(OUTPUT_PATH, frame)
                         
                         _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
@@ -388,6 +390,8 @@ def make_mouse_callback(state: AppState, front_rect_holder, back_rect_holder):
 def main() -> None:
     #폴더 추가 ==============
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR_FAIL, exist_ok=True)
+    os.makedirs(OUTPUT_DIR_PASS, exist_ok=True)
     #=======================
     trt_front = TRTInferenceEngine(FRONT_ENGINE_PATH)
     trt_back = TRTInferenceEngine(BACK_ENGINE_PATH)
