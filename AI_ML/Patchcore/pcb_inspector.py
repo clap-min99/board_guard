@@ -13,6 +13,7 @@ get_detections_front(frame) / get_detections_back(frame)
     화면의 [앞면 검사] / [뒷면 검사] 버튼 클릭, q로 종료
 """
 
+import threading
 import time
 
 import cv2
@@ -50,6 +51,26 @@ WINDOW_NAME = "PCB Inspector"
 BUTTON_HEIGHT = 60
 BUTTON_MARGIN = 10
 
+# ============================================================
+# 카메라 프레임 리더 (별도 스레드)
+# ============================================================
+# 판정(get_detections)이 카메라 전송 속도보다 느리면, cap.read()가 큐에 쌓인
+# 오래된 프레임부터 순서대로 꺼내게 되어 지연이 계속 누적됨(수 초~10초까지).
+# 그래서 카메라 읽기를 별도 스레드로 분리해 항상 "최신 프레임"만 유지하고,
+# 메인 루프는 처리 속도와 무관하게 그 최신 프레임만 참고하도록 함.
+
+latest_frame = None
+frame_lock = threading.Lock()
+
+
+def frame_reader(cap: cv2.VideoCapture) -> None:
+    global latest_frame
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        with frame_lock:
+            latest_frame = frame
 
 # ============================================================
 # 존재 여부 체크
@@ -234,7 +255,9 @@ def main() -> None:
     cap = cv2.VideoCapture(CAMERA_URL)
     if not cap.isOpened():
         raise RuntimeError("카메라를 열 수 없습니다.")
-
+    
+    threading.Thread(target=frame_reader, args=(cap,), daemon=True).start()
+    
     cv2.namedWindow(WINDOW_NAME)
 
     state = AppState()
@@ -246,10 +269,13 @@ def main() -> None:
 
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.05)
+            with frame_lock:
+                frame = latest_frame
+
+            if frame is None:
+                time.sleep(0.01)
                 continue
+            frame = frame.copy()
 
             display = frame.copy()
 
