@@ -3,9 +3,10 @@ import os
 import sqlite3
 import time
 import threading
+import traceback
 from flask import Flask, Response, render_template_string, jsonify
-from test import check_loop, get_inspection_result
-from database import init_database, save_fail_inspection
+from PCB_BG_full import inspect_frame, get_inspection_result
+# from database import init_database, save_fail_inspection
 
 app = Flask(__name__)
 
@@ -13,21 +14,23 @@ app = Flask(__name__)
 CAMERA_URL = "http://10.94.184.244:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
-MODEL_NAME = "PCB-YOLOv8"
-DEVICE_NAME = "Jetson Orin Nano"
+MODEL_NAME = "PCB-YOLOv11"
+DEVICE_NAME = "Jetson Orin Nano develop kit"
 
-init_database()
+# init_database()
 
 cap = None
 
 frame = None  # UI와 모델 추론이 함께 사용할 최신 프레임
 camera_error = False
+frame_id = 0
+frame_lock = threading.Lock()
 camera_fps = 0.0
 cnt = 1
 
 
 def camera_thread():
-    global cap, frame, camera_error, camera_fps
+    global cap, frame, camera_error, camera_fps, frame_id
     retry_count = 0
     fps_frame_count = 0
     fps_started_at = time.monotonic()
@@ -52,7 +55,9 @@ def camera_thread():
         ret, img = cap.read()
 
         if ret:
-            frame = img
+            with frame_lock:
+                frame = img
+                frame_id += 1
             retry_count = 0
             camera_error = False
             fps_frame_count += 1
@@ -105,11 +110,11 @@ latest_result = {
 
 
 def get_camera_frame():
-    """UI에 표시되는 IP 카메라의 최신 프레임을 검사 루프에 전달한다."""
-    if frame is None:
-        return None
-    return frame.copy()
+    with frame_lock:
+        if frame is None:
+            return None, None
 
+        return frame.copy(), frame_id
 
 def inspection_thread():
     """test.py의 최신 모델 결과를 웹 표시 데이터로 동기화한다."""
@@ -123,7 +128,8 @@ def inspection_thread():
         signature = (
             result.get("state"),
             result.get("check_number"),
-            repr(result.get("bounding_box")),
+            repr(result.get("pcb_box")),
+            repr(result.get("anomaly_box")),
             result.get("details"),
         )
 
@@ -154,30 +160,22 @@ def inspection_thread():
                 "fail_rate": round(fail_rate, 1),
                 "inspection_enabled": True,
             }
-            if result["state"] == "FAIL":
-                fail_result = dict(latest_result)
+        #     if result["state"] == "FAIL":
+        #         fail_result = dict(latest_result)
             last_signature = signature
 
-        if fail_result is not None:
-            try:
-                save_fail_inspection(
-                    fail_result,
-                    get_camera_frame(),
-                    MODEL_NAME,
-                    DEVICE_NAME,
-                )
-            except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
-                print(f"FAIL 검사 결과 저장 실패: {error}")
+        # if fail_result is not None:
+        #     try:
+        #         save_fail_inspection(
+                #    fail_result,
+                #    get_camera_frame()[0],
+                #    MODEL_NAME,
+                #    DEVICE_NAME,
+                #    )
+        #     except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+        #         print(f"FAIL 검사 결과 저장 실패: {error}")
 
         threading.Event().wait(0.05)
-
-
-threading.Thread(
-    target=check_loop,
-    # UI와 동일한 IP 카메라 프레임을 추론에 전달한다.
-    args=(inspection_enabled, get_camera_frame),
-    daemon=True
-).start()
 
 threading.Thread(
     target=inspection_thread,
@@ -185,24 +183,56 @@ threading.Thread(
 ).start()
 
 
+def inspection_worker():
+    last_frame_id = -1
+
+    while True:
+        inspection_enabled.wait()
+
+        image, current_frame_id = get_camera_frame()
+
+        if image is None:
+            time.sleep(0.05)
+            continue
+
+        if current_frame_id == last_frame_id:
+            time.sleep(0.005)
+            continue
+
+        try:
+            inspect_frame(image, current_frame_id)
+
+        except Exception as error:
+            print(f"프레임 추론 실패: {error}")
+            traceback.print_exc()
+
+            # 연속 오류 시 CPU를 과도하게 사용하지 않도록 잠시 대기
+            time.sleep(0.5)
+
+        else:
+            # 정상적으로 처리한 프레임만 완료 처리
+            last_frame_id = current_frame_id
+
+threading.Thread(
+    target=inspection_worker,
+    daemon=True
+).start()
+
 def draw_box(image, box, color, label, thickness):
-    """[x, y, width, height] 좌표가 유효할 때만 박스를 그린다."""
+    """[x1, y1, x2, y2] 좌표가 유효할 때만 박스를 그린다."""
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return
 
     try:
-        x, y, width, height = map(int, box)
+        x1, y1, x2, y2 = map(int, box)
     except (TypeError, ValueError):
         return
 
-    if width <= 0 or height <= 0:
-        return
-
     frame_height, frame_width = image.shape[:2]
-    x1 = max(0, min(x, frame_width - 1))
-    y1 = max(0, min(y, frame_height - 1))
-    x2 = max(0, min(x + width, frame_width - 1))
-    y2 = max(0, min(y + height, frame_height - 1))
+    x1 = max(0, min(x1, frame_width - 1))
+    y1 = max(0, min(y1, frame_height - 1))
+    x2 = max(0, min(x2, frame_width - 1))
+    y2 = max(0, min(y2, frame_height - 1))
 
     if x2 <= x1 or y2 <= y1:
         return
@@ -220,26 +250,19 @@ def draw_box(image, box, color, label, thickness):
 
 
 def draw_inspection_boxes(image, result):
-    """PCB는 파란색, 이상 영역은 빨간색으로 표시한다."""
-    if result.get("state") == "MISSING":
+    if result.get("state") in ("MISSING", "STOPPED"):
         return image
 
-    pcb_box = (
-        result.get("pcb_box")
-        or result.get("bounding_box")
-        or result.get("b_box")
-    )
-    draw_box(image, pcb_box, (255, 120, 0), "PCB", 2)
+    pcb_box = result.get("pcb_box")
+    if pcb_box is not None:
+        draw_box(image, pcb_box, (255, 120, 0), "PCB", 2)
 
-    anomaly_box = result.get("anomaly_box") or result.get("anomaly_boxes")
-    if (
-        isinstance(anomaly_box, (list, tuple))
-        and len(anomaly_box) == 1
-        and isinstance(anomaly_box[0], (list, tuple))
-    ):
-        anomaly_box = anomaly_box[0]
+    anomaly_box = result.get("anomaly_box")
 
-    draw_box(image, anomaly_box, (0, 0, 255), "ANOMALY", 3)
+    # FAIL이면서 anomaly_box가 있을 때만 빨간 박스 표시
+    if result.get("state") == "FAIL" and anomaly_box is not None:
+        draw_box(image, anomaly_box, (0, 0, 255), "ANOMALY", 3)
+
     return image
 
 def generate_frames():
@@ -666,6 +689,8 @@ def stop_inspection():
             "state": "STOPPED",
             "result": None,
             "message": "자동검사가 중단되었습니다.",
+            "pcb_box": None,
+            "anomaly_box": None,
             "inspection_enabled": False,
         }
         return jsonify(dict(latest_result))

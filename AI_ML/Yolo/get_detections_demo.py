@@ -25,8 +25,12 @@ import torch
 import numpy as np
 from ultralytics import YOLO
 
-CLS_ENGINE_PATH = "model_cls.engine"   # 빠른 판정용
-CLS_PT_PATH = "best.pt"                # Grad-CAM용 (Colab에서 다운받은 원본)
+from pathlib import Path
+
+MODEL_DIR = Path(__file__).resolve().parent
+
+CLS_ENGINE_PATH = str(MODEL_DIR / "model_cls.engine")
+CLS_PT_PATH = str(MODEL_DIR / "best.pt")
 
 CLASS_NAMES = {0: "defect", 1: "normal"}
 
@@ -37,19 +41,40 @@ _pt_model.model.eval()
 
 
 def find_object_box(img_bgr):
-    """PCB 전체가 화면에서 차지하는 영역을 찾음 (AI 없이, 배경과의 명암차 이용)"""
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    _, thresh = cv2.threshold(
+        blurred,
+        0,
+        255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+    )
+
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
     if not contours:
         return None
 
     largest = max(contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(largest)
-    return (int(x), int(y), int(x + w), int(y + h))
+    contour_area = cv2.contourArea(largest)
+    frame_area = img_bgr.shape[0] * img_bgr.shape[1]
 
+    # 화면 면적의 5%보다 작으면 PCB가 아닌 것으로 처리
+    if contour_area < frame_area * 0.05:
+        return None
+
+    x, y, w, h = cv2.boundingRect(largest)
+
+    # 너무 가늘거나 작은 윤곽 제거
+    if w < 80 or h < 80:
+        return None
+
+    return int(x), int(y), int(x + w), int(y + h)
 
 def _compute_gradcam_box(img_bgr, target_class):
     """Grad-CAM으로 불량 부위 박스를 계산 (defect일 때만 호출됨)"""
@@ -119,32 +144,32 @@ def _compute_gradcam_box(img_bgr, target_class):
 
 
 def get_detections(img_bgr):
-    """
-    img_bgr: OpenCV BGR 이미지 (카메라 프레임 한 장)
+    if img_bgr is None or img_bgr.size == 0:
+        return None, None, None, None
 
-    반환: (class, detail, object_box, bounding_box)
-    """
-    # 1. 빠른 판정 (항상 실행, .engine 사용)
-    results = _fast_model(img_bgr, imgsz=224, verbose=False)
-    class_id = results[0].probs.top1
-    confidence = float(results[0].probs.top1conf.item())
-    cls = CLASS_NAMES[class_id]
-    detail = confidence
-
-    # 2. PCB 전체 위치 (항상 계산, AI 불필요라 빠름)
+    # PCB 존재 여부를 먼저 검사
     object_box = find_object_box(img_bgr)
 
-    # 3. 불량 부위 위치 (defect일 때만, Grad-CAM 사용 - 느림)
+    if object_box is None:
+        return None, None, None, None
+
+    # PCB가 있을 때만 분류 모델 실행
+    results = _fast_model(img_bgr, imgsz=224, verbose=False)
+    class_id = int(results[0].probs.top1)
+    confidence = float(results[0].probs.top1conf.item())
+    cls = CLASS_NAMES[class_id]
+
     bounding_box = None
     if cls == "defect":
-        bounding_box = _compute_gradcam_box(img_bgr, target_class=class_id)
+        bounding_box = _compute_gradcam_box(
+            img_bgr,
+            target_class=class_id,
+        )
+
         if bounding_box is None:
-            # Grad-CAM이 뚜렷한 영역을 못 찾은 경우의 안전장치:
-            # 위치 정보 없이 "불량은 맞다"만 알려주고, 표시용으로 PCB 전체 영역을 대신 씀
             bounding_box = object_box
 
-    return (cls, detail, object_box, bounding_box)
-
+    return cls, confidence, object_box, bounding_box
 
 if __name__ == "__main__":
     import sys
