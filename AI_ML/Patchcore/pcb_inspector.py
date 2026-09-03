@@ -12,27 +12,43 @@ get_detections_front(frame) / get_detections_back(frame)
     python3 pcb_inspector_app.py
     화면의 [앞면 검사] / [뒷면 검사] 버튼 클릭, q로 종료
 """
-
-import threading
 import time
 
 import cv2
+import os
+import threading
+import time
 import numpy as np
 import pycuda.autoinit  # noqa: F401
 
 from trt_module import TRTInferenceEngine
+from collections import Counter
+
+one_history = []
+one_history_detail = []
+one_history_obox = []
+one_history_bbox = []
+two_history = []
+moviing_to = []
+check_number = 0
+loop_count = 1
+_missing_check = 1    
+_l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
+_inspection_state_lock = threading.RLock()
 
 # ============================================================
 # 설정
 # ============================================================
 
-FRONT_ENGINE_PATH = "model_front.engine"
-BACK_ENGINE_PATH = "model_back.engine"
-EMPTY_REFERENCE_PATH = "empty_reference.jpg"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+FRONT_ENGINE_PATH = os.path.join(BASE_DIR, "model_front.engine")
+BACK_ENGINE_PATH = os.path.join(BASE_DIR, "model_back.engine")
+EMPTY_REFERENCE_PATH = os.path.join(BASE_DIR, "empty_reference.jpg")
 
 IMG_SIZE = 256
 
-CAMERA_URL = "http://192.168.21.50:8080/video"   # 오늘 IP Webcam 주소로 수정
+CAMERA_URL = "http://10.205.212.205:8080/video"   # 오늘 IP Webcam 주소로 수정
 
 FRONT_THRESHOLD = 0.55
 BACK_THRESHOLD = 0.4
@@ -51,6 +67,167 @@ WINDOW_NAME = "PCB Inspector"
 BUTTON_HEIGHT = 60
 BUTTON_MARGIN = 10
 
+OUTPUT_DIR = "./inspection_images"
+
+# ============================================================
+# lol
+# ============================================================
+def state_vote(history):
+    if len(history) < 60:
+        return "INSPECTING"
+    else:
+        count = Counter(history)
+        answer = count.most_common(1)[0][0]
+        history.clear()
+    return answer
+
+def get_inspection_result(temp_list): #UI에서 호출 할 함수
+    
+    # answer = {
+    #     "state": "PASS",
+    #     "result": "NORMAL",
+    #     "message": "PASS",
+    #     "details": None,
+    #     "bounding_box": [10, 10, 5, 5]
+    # }
+    state, result, message, details, obox, bbox, chk_num = temp_list
+    
+    answer = {
+        "state": state,
+        "result": result,
+        "message": message,
+        "details": details,
+        "objecting_box": obox,
+        "bounding_box": bbox,
+        "check_number": chk_num
+    }
+
+    return answer
+
+def _check_loop_unlocked(cls, detail, boxes, frame):
+    """투표 상태 잠금을 획득한 상태에서 호출하는 내부 판정 함수."""
+    global loop_count
+
+    global _l_class
+    global _l_detail
+    global _l_bounding_box
+    global _l_temp
+    global one_history
+    global one_history_detail
+    global one_history_obox
+    global one_history_bbox
+    global check_number
+    global _l_state
+    global _l_state_detail
+    global _l_state_bbox
+    global _missing_check
+    global _l_object_box
+
+    try:
+            # 여기서부터 시작임 
+
+            # PCB 존재 판단
+            _l_class = cls
+            _l_detail = detail
+            _l_bounding_box = boxes
+            _l_object_box = None
+            #_l_class, _l_detail, _l_object_box, _l_bounding_box = get_detections() # 저거 받아다 써야됨
+
+            # 상태를 가지고 있어야함 PASS, FAIL, MISSING, INSPECTING
+            
+            # 여러 프레임 받아서 결과값 확정 처리하기 60fps마다 갱신하는거임. 
+
+            # 상태머신으로 만들기 위한 조건 
+            # _l_state이 PASS와 FAIL 이되면 투표를 하면 안됨. 분기 조건을 정하자
+            # _l_state이 INSPECTING 일때는 해도됨, MISSING 일 땐 해도 됨
+            # 상태조건
+            # MISSING -> INSPECTING -> PASS -> MISSING
+            #                       -> FAIL ┘
+            # 화면에 아무것도 안잡혀서 빈 리스트가 넘어올떄 미싱상태임. 
+            # 지금 유사 상태머신임.
+            if _l_class == "MISSING":
+                _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
+                one_history.clear()
+                #one_history_detail.clear()
+                #one_history_bbox.clear()
+                #one_history_obox.clear()
+                _missing_check = 1
+
+
+            # 뭔가 넘어왔음.
+            else :
+                if _missing_check == 1: #
+                    # 3개다 판단해서 가장 많이 되는걸로 뽑아다 주기
+                    # 미싱은 앞에서 처리했으니 성공 실패 검사중만 체크하면 됨.
+                    one_history.append(_l_class)           
+
+                    _l_state = state_vote(one_history)
+
+                    print(_l_state)
+                    if _l_state == "PASS": # 정상 검출 됬음.
+                        check_number += 1
+
+                        FILE_NAME = f"inspection_{check_number}_PASS.jpg"
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR, exist_ok=True)
+                        cv2.imwrite(OUTPUT_PATH, frame)
+
+                        _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        _missing_check = 0
+                        print(get_inspection_result(_l_temp))
+                    elif _l_state == "FAIL": # 비정상이래요.
+                        check_number += 1
+
+                        FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR, exist_ok=True)
+                        cv2.imwrite(OUTPUT_PATH, frame)
+                        
+                        _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        _missing_check = 0
+                        print(get_inspection_result(_l_temp))
+                    elif _l_state == "INSPECTING": # 검사중 이래요
+                        _l_temp = ["INSPECTING", None, "INSPECTING", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        print(get_inspection_result(_l_temp))
+                else:
+                    pass
+
+            # 검사 상태 관리 및 결과 확정
+            return get_inspection_result(_l_temp)
+            
+    finally:
+        pass
+
+
+def check_loop(cls, detail, boxes, frame=None):
+    """프레임 판정 결과를 투표 상태에 반영하고 현재 검사 상태를 반환한다."""
+    with _inspection_state_lock:
+        return _check_loop_unlocked(cls, detail, boxes, frame)
+
+
+def reset_inspection_state():
+    """누적 통계는 유지하고 현재 PCB의 투표 및 확정 상태만 초기화한다."""
+    global _missing_check, _l_temp
+    global _l_class, _l_detail, _l_bounding_box, _l_object_box
+
+    with _inspection_state_lock:
+        one_history.clear()
+        one_history_detail.clear()
+        one_history_obox.clear()
+        one_history_bbox.clear()
+        two_history.clear()
+        moviing_to.clear()
+
+        _l_class = "MISSING"
+        _l_detail = None
+        _l_bounding_box = None
+        _l_object_box = None
+        _missing_check = 1
+        _l_temp = [
+            "MISSING", None, "MISSING",
+            None, None, None, check_number,
+        ]
+
 # ============================================================
 # 카메라 프레임 리더 (별도 스레드)
 # ============================================================
@@ -59,18 +236,18 @@ BUTTON_MARGIN = 10
 # 그래서 카메라 읽기를 별도 스레드로 분리해 항상 "최신 프레임"만 유지하고,
 # 메인 루프는 처리 속도와 무관하게 그 최신 프레임만 참고하도록 함.
 
-latest_frame = None
-frame_lock = threading.Lock()
+# latest_frame = None
+# frame_lock = threading.Lock()
 
 
-def frame_reader(cap: cv2.VideoCapture) -> None:
-    global latest_frame
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            continue
-        with frame_lock:
-            latest_frame = frame
+# def frame_reader(cap: cv2.VideoCapture) -> None:
+#     global latest_frame
+#     while True:
+#         ok, frame = cap.read()
+#         if not ok:
+#             continue
+#         with frame_lock:
+#             latest_frame = frame
 
 # ============================================================
 # 존재 여부 체크
@@ -174,144 +351,148 @@ def get_detections(frame_bgr, trt_engine, empty_ref_gray, threshold):
 # 화면 그리기
 # ============================================================
 
-def draw_defect_box(frame, box):
-    x1, y1, x2, y2 = box
-    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-    cv2.putText(
-        frame, "DEFECT", (x1, max(y1 - 8, 20)),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
-    )
+# def draw_defect_box(frame, box):
+#     x1, y1, x2, y2 = box
+#     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+#     cv2.putText(
+#         frame, "DEFECT", (x1, max(y1 - 8, 20)),
+#         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
+#     )
 
 
-def draw_result_banner(frame, side_label, cls, detail):
-    color_map = {"MISSING": (0, 165, 255), "PASS": (0, 200, 0), "FAIL": (0, 0, 255)}
-    color = color_map.get(cls, (200, 200, 200))
-    text = f"[{side_label}] {cls}  detail={detail:.3f}"
-    cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (30, 30, 30), -1)
-    cv2.putText(frame, text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
+# def draw_result_banner(frame, side_label, cls, detail):
+#     color_map = {"MISSING": (0, 165, 255), "PASS": (0, 200, 0), "FAIL": (0, 0, 255)}
+#     color = color_map.get(cls, (200, 200, 200))
+#     text = f"[{side_label}] {cls}  detail={detail:.3f}"
+#     cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (30, 30, 30), -1)
+#     cv2.putText(frame, text, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
 
 
-def draw_buttons(frame, active_mode):
-    h, w = frame.shape[:2]
-    btn_w = (w - BUTTON_MARGIN * 3) // 2
+# def draw_buttons(frame, active_mode):
+#     h, w = frame.shape[:2]
+#     btn_w = (w - BUTTON_MARGIN * 3) // 2
 
-    front_rect = (BUTTON_MARGIN, h - BUTTON_HEIGHT - BUTTON_MARGIN,
-                  BUTTON_MARGIN + btn_w, h - BUTTON_MARGIN)
-    back_rect = (BUTTON_MARGIN * 2 + btn_w, h - BUTTON_HEIGHT - BUTTON_MARGIN,
-                 BUTTON_MARGIN * 2 + btn_w * 2, h - BUTTON_MARGIN)
+#     front_rect = (BUTTON_MARGIN, h - BUTTON_HEIGHT - BUTTON_MARGIN,
+#                   BUTTON_MARGIN + btn_w, h - BUTTON_MARGIN)
+#     back_rect = (BUTTON_MARGIN * 2 + btn_w, h - BUTTON_HEIGHT - BUTTON_MARGIN,
+#                  BUTTON_MARGIN * 2 + btn_w * 2, h - BUTTON_MARGIN)
 
-    buttons = [(front_rect, "FRONT CHECK", "front"), (back_rect, "BACK CHECK", "back")]
-    for rect, label, mode_key in buttons:
-        x1, y1, x2, y2 = rect
-        color = (0, 140, 0) if active_mode == mode_key else (80, 80, 80)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
-        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-        tx = x1 + (x2 - x1 - text_size[0]) // 2
-        ty = y1 + (y2 - y1 + text_size[1]) // 2
-        cv2.putText(frame, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+#     buttons = [(front_rect, "FRONT CHECK", "front"), (back_rect, "BACK CHECK", "back")]
+#     for rect, label, mode_key in buttons:
+#         x1, y1, x2, y2 = rect
+#         color = (0, 140, 0) if active_mode == mode_key else (80, 80, 80)
+#         cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
+#         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
+#         text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+#         tx = x1 + (x2 - x1 - text_size[0]) // 2
+#         ty = y1 + (y2 - y1 + text_size[1]) // 2
+#         cv2.putText(frame, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
-    return front_rect, back_rect
+#     return front_rect, back_rect
 
 
-def point_in_rect(x, y, rect):
-    x1, y1, x2, y2 = rect
-    return x1 <= x <= x2 and y1 <= y <= y2
+# def point_in_rect(x, y, rect):
+#     x1, y1, x2, y2 = rect
+#     return x1 <= x <= x2 and y1 <= y <= y2
 
 
 # ============================================================
 # 메인
 # ============================================================
 
-class AppState:
-    def __init__(self):
-        self.mode = None          # "front" | "back" | None (검사 안 하는 대기 상태)
-        self.last_result = None   # (side_label, class, detail, boxes)
+# class AppState:
+#     def __init__(self):
+#         self.mode = None          # "front" | "back" | None (검사 안 하는 대기 상태)
+#         self.last_result = None   # (side_label, class, detail, boxes)
 
 
-def make_mouse_callback(state: AppState, front_rect_holder, back_rect_holder):
-    def on_mouse(event, x, y, flags, param):
-        if event != cv2.EVENT_LBUTTONDOWN:
-            return
-        if point_in_rect(x, y, front_rect_holder[0]):
-            state.mode = "front" if state.mode != "front" else None
-        elif point_in_rect(x, y, back_rect_holder[0]):
-            state.mode = "back" if state.mode != "back" else None
+# def make_mouse_callback(state: AppState, front_rect_holder, back_rect_holder):
+#     def on_mouse(event, x, y, flags, param):
+#         if event != cv2.EVENT_LBUTTONDOWN:
+#             return
+#         if point_in_rect(x, y, front_rect_holder[0]):
+#             state.mode = "front" if state.mode != "front" else None
+#         elif point_in_rect(x, y, back_rect_holder[0]):
+#             state.mode = "back" if state.mode != "back" else None
 
-    return on_mouse
+#     return on_mouse
 
 
-def main() -> None:
-    trt_front = TRTInferenceEngine(FRONT_ENGINE_PATH)
-    trt_back = TRTInferenceEngine(BACK_ENGINE_PATH)
-    empty_ref_gray = load_empty_reference(EMPTY_REFERENCE_PATH, size=IMG_SIZE)
+# def main() -> None:
+#     trt_front = TRTInferenceEngine(FRONT_ENGINE_PATH)
+#     trt_back = TRTInferenceEngine(BACK_ENGINE_PATH)
+#     empty_ref_gray = load_empty_reference(EMPTY_REFERENCE_PATH, size=IMG_SIZE)
 
-    def get_detections_front(frame_bgr):
-        return get_detections(frame_bgr, trt_front, empty_ref_gray, FRONT_THRESHOLD)
+#     def get_detections_front(frame_bgr):
+#         return get_detections(frame_bgr, trt_front, empty_ref_gray, FRONT_THRESHOLD)
 
-    def get_detections_back(frame_bgr):
-        return get_detections(frame_bgr, trt_back, empty_ref_gray, BACK_THRESHOLD)
+#     def get_detections_back(frame_bgr):
+#         return get_detections(frame_bgr, trt_back, empty_ref_gray, BACK_THRESHOLD)
 
-    cap = cv2.VideoCapture(CAMERA_URL)
-    if not cap.isOpened():
-        raise RuntimeError("카메라를 열 수 없습니다.")
+#     cap = cv2.VideoCapture(CAMERA_URL)
+#     if not cap.isOpened():
+#         raise RuntimeError("카메라를 열 수 없습니다.")
     
-    threading.Thread(target=frame_reader, args=(cap,), daemon=True).start()
+#     threading.Thread(target=frame_reader, args=(cap,), daemon=True).start()
     
-    cv2.namedWindow(WINDOW_NAME)
+#     cv2.namedWindow(WINDOW_NAME)
 
-    state = AppState()
-    front_rect_holder = [(0, 0, 0, 0)]
-    back_rect_holder = [(0, 0, 0, 0)]
-    cv2.setMouseCallback(WINDOW_NAME, make_mouse_callback(state, front_rect_holder, back_rect_holder))
+#     state = AppState()
+#     front_rect_holder = [(0, 0, 0, 0)]
+#     back_rect_holder = [(0, 0, 0, 0)]
+#     cv2.setMouseCallback(WINDOW_NAME, make_mouse_callback(state, front_rect_holder, back_rect_holder))
 
-    print("FRONT/BACK 버튼을 클릭하면 그 모드로 전환되어 계속 판정됩니다. 같은 버튼 다시 클릭 시 대기 상태로 전환. q: 종료")
+#     print("FRONT/BACK 버튼을 클릭하면 그 모드로 전환되어 계속 판정됩니다. 같은 버튼 다시 클릭 시 대기 상태로 전환. q: 종료")
 
-    try:
-        while True:
-            with frame_lock:
-                frame = latest_frame
+#     try:
+#         while True:
+#             with frame_lock:
+#                 frame = latest_frame
 
-            if frame is None:
-                time.sleep(0.01)
-                continue
-            frame = frame.copy()
+#             if frame is None:
+#                 time.sleep(0.01)
+#                 continue
+#             frame = frame.copy()
 
-            display = frame.copy()
+#             display = frame.copy()
 
-            if state.mode == "front":
-                cls, detail, boxes = get_detections_front(frame)
-                state.last_result = ("FRONT", cls, detail, boxes)
-            elif state.mode == "back":
-                cls, detail, boxes = get_detections_back(frame)
-                state.last_result = ("BACK", cls, detail, boxes)
-            else:
-                state.last_result = None
+#             if state.mode == "front":
+#                 cls, detail, boxes = get_detections_front(frame)
+#                 state.last_result = ("FRONT", cls, detail, boxes)
+#                 check_loop(cls, detail, boxes)
 
-            if state.last_result is not None:
-                side_label, cls, detail, boxes = state.last_result
-                for box in boxes:
-                    draw_defect_box(display, box)
-                draw_result_banner(display, side_label, cls, detail)
-            else:
-                cv2.rectangle(display, (0, 0), (display.shape[1], 40), (30, 30, 30), -1)
-                cv2.putText(
-                    display, "대기 중 - FRONT 또는 BACK 버튼을 눌러 검사 시작", (10, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA,
-                )
+#             elif state.mode == "back":
+#                 cls, detail, boxes = get_detections_back(frame)
+#                 state.last_result = ("BACK", cls, detail, boxes)
+#                 check_loop(cls, detail, boxes)
+                
+#             else:
+#                 state.last_result = None
 
-            front_rect, back_rect = draw_buttons(display, state.mode)
-            front_rect_holder[0] = front_rect
-            back_rect_holder[0] = back_rect
+#             if state.last_result is not None:
+#                 side_label, cls, detail, boxes = state.last_result
+#                 for box in boxes:
+#                     draw_defect_box(display, box)
+#                 draw_result_banner(display, side_label, cls, detail)
+#             else:
+#                 cv2.rectangle(display, (0, 0), (display.shape[1], 40), (30, 30, 30), -1)
+#                 cv2.putText(
+#                     display, "대기 중 - FRONT 또는 BACK 버튼을 눌러 검사 시작", (10, 28),
+#                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1, cv2.LINE_AA,
+#                 )
 
-            cv2.imshow(WINDOW_NAME, display)
+#             front_rect, back_rect = draw_buttons(display, state.mode)
+#             front_rect_holder[0] = front_rect
+#             back_rect_holder[0] = back_rect
 
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
+#             cv2.imshow(WINDOW_NAME, display)
+
+#             if cv2.waitKey(1) & 0xFF == ord("q"):
+#                 break
+#     finally:
+#         cap.release()
+#         cv2.destroyAllWindows()
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

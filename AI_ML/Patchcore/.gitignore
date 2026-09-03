@@ -24,3 +24,4 @@ venv/
 # 기타
 .ipynb_checkpoints/
 *.log
+inspection_images/
