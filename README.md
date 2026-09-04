@@ -7,3 +7,25 @@
 | 부저 | PB4 | TIM3_CH1_PWM | AF2 |
 | 스탭모터 4핀 | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 |
 | 서보모터 | PB5 | TIM3_CH2_PWM | AF2 |
+
+
+## JETSON ORIN NANO gpio pin setting
+
+io 명령어
+```
+sudo /opt/nvidia/jetson-io/jetson-io.py
+```
+
+```
+Configure Jetson 40pin Header
+    ↓
+Configure header pins manually
+    ↓
+제어하고자 하는 핀 설정
+    ↓
+GPIO
+    ↓
+Save pin changes
+    ↓
+Save and reboot
+```
