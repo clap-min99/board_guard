@@ -39,7 +39,7 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 ## M4 Nuclear64 PIN MAP
 | 상태 | 핀 | 설정 |
 | --- | --- | --- | 
-| 양품 | 10 | GPIO Output |
+| 양품 | 11 | GPIO Output |
 | 불량품 | 12 | GPIO Output |
 
 # 2. 상태 및 이벤트
