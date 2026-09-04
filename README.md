@@ -74,9 +74,9 @@ EVENT_FAIL()
 # 2.3 이벤트 동작 규칙
 | 이벤트 | 동작 |
 | --- | --- | 
-| EVENT_IDLE | `None` |
-| EVENT_NORMAL | LED(綠) ▷ On, 스탭모터 ▷ One cycle |
-| EVENT_FAIL | LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On, 스탭모터 ▷ One cycle |
+| EVENT_IDLE | 스탭모터 ▷ One cycle |
+| EVENT_NORMAL | LED(綠) ▷ On |
+| EVENT_FAIL | LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On |
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
 
@@ -132,6 +132,13 @@ EVENT_FAIL()
 | --- | --- |
 | 赤 | EVENT_FAIL 발생 시 5초간 점등 |
 | 綠 | EVENT_NORMAL 발생 시 5초간 점등 |
+| `None` | --- |
+
+# 5. BUZZER
+
+| 항목 | 결정 내용 |
+| --- | --- |
+| On | EVENT_FAIL 발생 시 특정알람 |
 | `None` | --- |
 
 
