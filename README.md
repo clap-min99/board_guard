@@ -11,21 +11,39 @@
 
 ## JETSON ORIN NANO gpio pin setting
 
-io 명령어
+### 입력
+
 ```
 sudo /opt/nvidia/jetson-io/jetson-io.py
 ```
-
+#### 설정
 ```
 Configure Jetson 40pin Header
     ↓
 Configure header pins manually
     ↓
-제어하고자 하는 핀 설정
+제어하고자 하는 핀
     ↓
-GPIO
+모드 설정 GPIO
     ↓
 Save pin changes
     ↓
 Save and reboot
 ```
+
+### sample ex code
+
+```
+import Jetson.GPIO as GPIO
+import time
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(12, GPIO.OUT)
+GPIO.output(12, GPIO.HIGH)
+time.sleep(100)
+GPIO.output(12, GPIO.LOW)
+GPIO.cleanup()
+```
+
+# 설계
+
+# 0. 
