@@ -62,6 +62,7 @@ EVENT_FAIL()
 전원 인가  
     → 주변장치 초기화
     → IDLE 상태 대기
+    → 컨베이어 벨트 동작
 ```
 
 # 2.2 상태 규칙
@@ -83,19 +84,19 @@ EVENT_FAIL()
 # 2.4 전체 흐름
 
 ```
-1. 최초 부팅 STATE_IDLE
+1. 최초 부팅 STATE_IDLE 스탭모터 ▷ One cycle
 2. PCB 판단 시작
     2.1 양품 결정 
         2.1.1 JETSON PIN10 GPIO HIGH - > (PC10 INTERRUPT)
         2.1.2 STATE_NORMAL 진입, Queue에 이벤트 push
-        2.1.3 Queue 읽고 이벤트 동작(LED(赤) ▷ OFF, LED(綠) ▷ On, 스탭모터 ▷ One cycle)
+        2.1.3 Queue 읽고 이벤트 동작(LED(赤) ▷ OFF, LED(綠) ▷ On)
 
     2.2 불량품 결정 (PC12 INTERRUPT)
         2.2.1 JETSON PIN12 GPIO HIGH - > (PC12 INTERRUPT)
         2.2.2 STATE_FAIL 진입, Queue에 이벤트 push
-        2.2.3 Queue 읽고 이벤트 동작(LED(綠) ▷ OFF, LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On, 스탭모터 ▷ One cycle)
+        2.2.3 Queue 읽고 이벤트 동작(LED(綠) ▷ OFF, LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On)
 
-3. 대기 상태 복귀(STATE_IDLE)
+3. 대기 상태 복귀(STATE_IDLE) 스탭모터 ▷ One cycle
 ````
 
 # 3. 스탭모터
