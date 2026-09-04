@@ -144,7 +144,10 @@ EVENT_FAIL()
 
 
 
+# 6. 검증
 
+1. 젠슨과 아트메가 그라운드 연결 필수임
+2. 젠슨 gpio 정상 동작 11번 12번 인터럽트까지 확인.
 
 ## JETSON ORIN NANO gpio pin setting
 
