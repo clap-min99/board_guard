@@ -42,7 +42,7 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | 양품 | 10 | GPIO Output |
 | 불량품 | 12 | GPIO Output |
 
-# 2. 상세 및 이벤트
+# 2. 상태 및 이벤트
 
 ```
 typedef enum {
