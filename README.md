@@ -70,7 +70,6 @@ EVENT_FAIL()
 | STATE_IDLE | 최초 부팅, 이벤트가 없을 경우 | pc10, pc12 | PC10(양품) ▷ STATE_NORMAL PC12(불량품) ▷ STATE_FAIL |
 | STATE_NORMAL | PC10 INTERRUPT  | `None` | STATE_IDLE |
 | STATE_FAIL | PC12 INTERRUPT  | `None` | STATE_IDLE |
-| STATE_MISSING | STATE_NORMAL, STATE_FAIL | `None` | STATE_IDLE |
 
 # 2.3 이벤트 동작 규칙
 | 이벤트 | 동작 |
