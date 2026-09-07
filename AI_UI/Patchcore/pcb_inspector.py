@@ -23,6 +23,7 @@ import pycuda.autoinit  # noqa: F401
 
 from trt_module import TRTInferenceEngine
 from collections import Counter
+from drawing import draw_inspection_boxes
 
 one_history = []
 one_history_detail = []
@@ -70,9 +71,9 @@ BUTTON_MARGIN = 10
 # ========================================================
 # 사진 저장할 설정 추가
 # ========================================================
-OUTPUT_DIR = "./inspection_images"
-OUTPUT_DIR_FAIL = "./inspection_images/fail"
-OUTPUT_DIR_PASS = "./inspection_images/pass"
+OUTPUT_DIR = os.path.join(BASE_DIR, "inspection_images")
+OUTPUT_DIR_FAIL = os.path.join(OUTPUT_DIR, "fail")
+OUTPUT_DIR_PASS = os.path.join(OUTPUT_DIR, "pass")
 
 # ============================================================
 # lol
@@ -186,7 +187,17 @@ def _check_loop_unlocked(cls, detail, boxes, frame):
                         FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
                         OUTPUT_PATH = os.path.join(OUTPUT_DIR_FAIL,FILE_NAME)
                         os.makedirs(OUTPUT_DIR_FAIL, exist_ok=True)
-                        saved = cv2.imwrite(OUTPUT_PATH, frame)
+
+                        saved_frame = frame.copy()
+                        draw_inspection_boxes(
+                            saved_frame,
+                            {
+                                "state": "FAIL",
+                                "objecting_box": _l_object_box,
+                                "bounding_box": _l_bounding_box,
+                            },
+                        )
+                        saved = cv2.imwrite(OUTPUT_PATH, saved_frame)
                         
                         _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
                         _missing_check = 0

@@ -257,6 +257,126 @@ h1 {
     text-align: center;
 }
 
+.inspection-table-wrap {
+    max-height: 215px;
+    overflow-y: auto;
+}
+
+.inspection-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+}
+
+.inspection-table th,
+.inspection-table td {
+    padding: 8px 6px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.inspection-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    color: #64748b;
+    background: #ffffff;
+    font-weight: 600;
+}
+
+.inspection-table th:nth-child(1) { width: 24%; }
+.inspection-table th:nth-child(2) { width: 30%; }
+
+.inspection-thumbnail {
+    display: block;
+    width: 64px;
+    height: 44px;
+    margin: 0 auto;
+    border-radius: 5px;
+    object-fit: cover;
+}
+
+.result-badge {
+    display: inline-block;
+    color: inherit;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.result-badge.pass { color: var(--green); }
+.result-badge.fail { color: var(--red); }
+
+.inspection-image-button {
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.inspection-image-button:focus-visible,
+#image-modal-close:focus-visible {
+    outline: 3px solid var(--blue);
+    outline-offset: 3px;
+}
+
+body.image-modal-open { overflow: hidden; }
+
+.image-modal {
+    width: 96vw;
+    max-width: 96vw;
+    max-height: 96dvh;
+    padding: 16px;
+    border: 0;
+    color: var(--text);
+    background: var(--panel);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.image-modal::backdrop { background: rgba(0, 0, 0, 0.65); }
+
+.image-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 0 8px;
+    margin: 0;
+}
+
+.image-modal-header > div { min-width: 0; overflow-wrap: anywhere; }
+
+#image-modal-time { margin-left: 12px; font-size: 14px; }
+#image-modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    padding: 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+
+#image-modal-preview {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+#image-modal-preview[hidden] { display: none; }
+
+.empty-row {
+    height: 120px;
+    color: var(--muted);
+}
+
 .chart-canvas,
 .trend-canvas {
     display: block;

@@ -5,16 +5,18 @@ import time
 import threading
 import traceback
 import pycuda.driver as cuda
-from flask import Flask, Response, render_template_string, jsonify
+from flask import Flask, Response, render_template_string, jsonify, send_from_directory
+from drawing import draw_inspection_boxes
 from pcb_inspector import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, FRONT_ENGINE_PATH,
-BACK_ENGINE_PATH,EMPTY_REFERENCE_PATH,IMG_SIZE, FRONT_THRESHOLD,BACK_THRESHOLD,)
+BACK_ENGINE_PATH,EMPTY_REFERENCE_PATH,IMG_SIZE, FRONT_THRESHOLD,BACK_THRESHOLD,
+OUTPUT_DIR_PASS, OUTPUT_DIR_FAIL,)
 
 # from database import init_database, save_fail_inspection
 
 app = Flask(__name__)
 
 # 핸드폰 카메라
-CAMERA_URL = "http://10.94.184.244:8080/video"
+CAMERA_URL = "http://172.30.6.127:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
 MODEL_NAME = "PCB-YOLOv11"
@@ -252,70 +254,6 @@ threading.Thread(
     daemon=True
 ).start()
 
-def draw_box(image, box, color, label, thickness):
-    """[x1, y1, x2, y2] 좌표가 유효할 때만 박스를 그린다."""
-    if not isinstance(box, (list, tuple)) or len(box) != 4:
-        return
-
-    try:
-        x1, y1, x2, y2 = map(int, box)
-    except (TypeError, ValueError):
-        return
-
-    frame_height, frame_width = image.shape[:2]
-    x1 = max(0, min(x1, frame_width - 1))
-    y1 = max(0, min(y1, frame_height - 1))
-    x2 = max(0, min(x2, frame_width - 1))
-    y2 = max(0, min(y2, frame_height - 1))
-
-    if x2 <= x1 or y2 <= y1:
-        return
-
-    cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
-    cv2.putText(
-        image,
-        label,
-        (x1, max(24, y1 - 8)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        color,
-        2,
-    )
-
-
-def draw_boxes(image, boxes, color, label, thickness):
-    """단일 박스와 여러 박스 목록을 모두 영상에 그린다."""
-    if not isinstance(boxes, (list, tuple)):
-        return
-
-    # [x1, y1, x2, y2] 형태의 단일 박스도 기존처럼 지원한다.
-    if len(boxes) == 4 and all(
-        isinstance(value, (int, float)) for value in boxes
-    ):
-        draw_box(image, boxes, color, label, thickness)
-        return
-
-    # [[x1, y1, x2, y2], ...] 형태의 모든 박스를 표시한다.
-    for box_number, box in enumerate(boxes, start=1):
-        draw_box(image, box, color, f"{label} {box_number}", thickness)
-
-
-def draw_inspection_boxes(image, result):
-    if result.get("state") in ("MISSING", "STOPPED"):
-        return image
-
-    objecting_box = result.get("objecting_box")
-    if objecting_box is not None:
-        draw_boxes(image, objecting_box, (255, 120, 0), "PCB", 2)
-
-    bounding_box = result.get("bounding_box")
-
-    # FAIL이면서 bounding_box 있을 때만 빨간 박스 표시
-    if result.get("state") == "FAIL" and bounding_box is not None:
-        draw_boxes(image, bounding_box, (0, 0, 255), "ANOMALY", 3)
-
-    return image
-
 def generate_frames():
 
     while True:
@@ -427,8 +365,17 @@ def index():
                         </article>
 
                         <article class="chart-card">
-                            <h2>상태별 발생 건수</h2>
-                            <canvas id="statusChart" class="chart-canvas"></canvas>
+                            <h2>최근 저장 이미지</h2>
+                            <div class="inspection-table-wrap">
+                                <table class="inspection-table">
+                                    <thead>
+                                        <tr><th>결과</th><th>이미지</th><th>저장 시간</th></tr>
+                                    </thead>
+                                    <tbody id="inspection-image-list">
+                                        <tr><td colspan="3" class="empty-row">저장된 이미지가 없습니다.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </article>
                     </div>
 
@@ -440,7 +387,100 @@ def index():
             </div>
         </main>
 
+        <dialog id="image-modal" class="image-modal" aria-label="검사 이미지 확대">
+            <div class="image-modal-header">
+                <div>
+                    <span id="image-modal-state" class="result-badge"></span>
+                    <span id="image-modal-time"></span>
+                </div>
+                <button id="image-modal-close" type="button" aria-label="닫기" autofocus>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                </button>
+            </div>
+            <p id="image-modal-error" role="status" hidden>이미지를 불러오지 못했습니다.</p>
+            <img id="image-modal-preview" alt="검사 이미지 원본">
+        </dialog>
+
         <script>
+            const imageModal = document.getElementById('image-modal');
+            const modalPreview = document.getElementById('image-modal-preview');
+            const modalError = document.getElementById('image-modal-error');
+            let inspectionImages = [];
+            let currentModalImageIndex = -1;
+
+            function fitImageModal() {
+                if (!imageModal.open || !modalPreview.naturalWidth || modalPreview.hidden) return;
+                const maxWidth = document.documentElement.clientWidth * 0.96;
+                const maxHeight = window.innerHeight * 0.96;
+                const style = getComputedStyle(imageModal);
+                const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+                const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+                imageModal.style.width = `${maxWidth}px`;
+                // 폭이 줄어 헤더가 줄바꿈되는 경우에도 이미지 전체가 화면에 들어오게 한다.
+                for (let i = 0; i < 3; i++) {
+                    const headerHeight = imageModal.querySelector('.image-modal-header').getBoundingClientRect().height;
+                    const scale = Math.min(
+                        Math.max(1, maxWidth - horizontalPadding) / modalPreview.naturalWidth,
+                        Math.max(1, maxHeight - verticalPadding - headerHeight) / modalPreview.naturalHeight
+                    );
+                    imageModal.style.width = `${modalPreview.naturalWidth * scale + horizontalPadding}px`;
+                }
+            }
+
+            modalPreview.addEventListener('load', fitImageModal);
+            window.addEventListener('resize', fitImageModal);
+
+            function openInspectionImage(index) {
+                if (index < 0 || index >= inspectionImages.length) return;
+
+                currentModalImageIndex = index;
+                const item = inspectionImages[index];
+                const state = document.getElementById('image-modal-state');
+                state.textContent = item.state;
+                state.className = `result-badge ${item.state.toLowerCase()}`;
+                document.getElementById('image-modal-time').textContent = item.saved_at;
+                modalError.hidden = true;
+                modalPreview.hidden = false;
+                modalPreview.alt = `${item.state} 검사 이미지 · ${item.saved_at}`;
+                modalPreview.src = item.url;
+                if (!imageModal.open) {
+                    imageModal.showModal();
+                    document.body.classList.add('image-modal-open');
+                }
+                if (modalPreview.complete) fitImageModal();
+            }
+
+            document.addEventListener('keydown', (event) => {
+                if (!imageModal.open || event.altKey || event.ctrlKey || event.metaKey) return;
+
+                if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    openInspectionImage(currentModalImageIndex - 1);
+                } else if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    openInspectionImage(currentModalImageIndex + 1);
+                }
+            });
+
+            modalPreview.addEventListener('error', () => {
+                modalPreview.hidden = true;
+                modalError.hidden = false;
+            });
+            document.getElementById('image-modal-close').addEventListener('click', () => imageModal.close());
+            imageModal.addEventListener('click', (event) => {
+                const bounds = imageModal.getBoundingClientRect();
+                if (event.target === imageModal && (
+                    event.clientX < bounds.left || event.clientX > bounds.right ||
+                    event.clientY < bounds.top || event.clientY > bounds.bottom
+                )) imageModal.close();
+            });
+            imageModal.addEventListener('close', () => {
+                document.body.classList.remove('image-modal-open');
+                currentModalImageIndex = -1;
+            });
+
             function displayInspectionResult(data) {
             const resultElement = document.getElementById('result-value');
 
@@ -488,19 +528,6 @@ def index():
             }
 
             function updateCharts(data) {
-                const statusIndex = {
-                    'PASS': 0,
-                    'FAIL': 1,
-                    'MISSING': 2
-                }[data.state];
-
-                if (statusIndex === undefined) {
-                    return;
-                }
-
-                statusChart.data.datasets[0].data[statusIndex] += 1;
-                statusChart.update();
-
                 if (data.state === 'MISSING') {
                     return;
                 }
@@ -522,6 +549,67 @@ def index():
                     trendChart.data.datasets[0].data.shift();
                 }
                 trendChart.update();
+            }
+
+            async function fetchInspectionImages() {
+                try {
+                    const response = await fetch('/inspection/images');
+                    if (!response.ok) throw new Error(`저장 이미지 조회 실패: ${response.status}`);
+
+                    const images = await response.json();
+                    const currentModalImageUrl = imageModal.open
+                        ? inspectionImages[currentModalImageIndex]?.url
+                        : null;
+                    inspectionImages = images;
+                    if (currentModalImageUrl) {
+                        currentModalImageIndex = inspectionImages.findIndex(
+                            (item) => item.url === currentModalImageUrl
+                        );
+                    }
+                    const tableBody = document.getElementById('inspection-image-list');
+                    tableBody.replaceChildren();
+
+                    if (images.length === 0) {
+                        const row = document.createElement('tr');
+                        const cell = document.createElement('td');
+                        cell.colSpan = 3;
+                        cell.className = 'empty-row';
+                        cell.textContent = '저장된 이미지가 없습니다.';
+                        row.appendChild(cell);
+                        tableBody.appendChild(row);
+                        return;
+                    }
+
+                    for (const [index, item] of images.entries()) {
+                        const row = document.createElement('tr');
+                        const stateCell = document.createElement('td');
+                        const badge = document.createElement('span');
+                        badge.className = `result-badge ${item.state.toLowerCase()}`;
+                        badge.textContent = item.state;
+                        stateCell.appendChild(badge);
+
+                        const imageCell = document.createElement('td');
+                        const link = document.createElement('button');
+                        link.type = 'button';
+                        link.className = 'inspection-image-button';
+                        link.setAttribute('aria-label', `${item.state} ${item.saved_at} 이미지 확대`);
+                        link.setAttribute('aria-haspopup', 'dialog');
+                        link.addEventListener('click', () => openInspectionImage(index));
+                        const preview = document.createElement('img');
+                        preview.className = 'inspection-thumbnail';
+                        preview.src = item.url;
+                        preview.alt = `${item.state} 검사 이미지`;
+                        link.appendChild(preview);
+                        imageCell.appendChild(link);
+
+                        const timeCell = document.createElement('td');
+                        timeCell.textContent = item.saved_at;
+                        row.append(stateCell, imageCell, timeCell);
+                        tableBody.appendChild(row);
+                    }
+                } catch (error) {
+                    console.error(error);
+                }
             }
 
             let lastInspectionId = 0;
@@ -615,6 +703,9 @@ def index():
 
                     if (data.inspection_id > lastInspectionId && data.state !== 'INSPECTING') {
                         updateCharts(data);
+                        if (data.state === 'PASS' || data.state === 'FAIL') {
+                            fetchInspectionImages();
+                        }
                         lastInspectionId = data.inspection_id;
                         console.log('자동 검사 결과:', data);
                     }
@@ -629,6 +720,7 @@ def index():
             }
 
             fetchLatestInspection();
+            fetchInspectionImages();
             setInterval(fetchLatestInspection, 500);
 
             const defectChart = new Chart(document.getElementById('defectChart'), {
@@ -648,40 +740,6 @@ def index():
                     plugins: {
                         legend: { display: false },
                         tooltip: { enabled: true }
-                    }
-                }
-            });
-
-            const statusChart = new Chart(document.getElementById('statusChart'), {
-                type: 'bar',
-                data: {
-                    labels: ['정상', '불량', '미감지'],
-                    datasets: [{
-                        data: [0, 0, 0],
-                        backgroundColor: ['#28a590', '#ef5964', '#f59e0b'],
-                        borderRadius: 4,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: '#28324a' },
-                            ticks: {
-                                precision: 0,
-                                color: '#9ba8bc'
-                            }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#9ba8bc' }
-                        }
                     }
                 }
             });
@@ -762,6 +820,55 @@ def inspection():
         })
 
     return jsonify(result)
+
+
+@app.route("/inspection/images", methods=["GET"])
+def inspection_images():
+    images = []
+
+    for state, directory in (("PASS", OUTPUT_DIR_PASS), ("FAIL", OUTPUT_DIR_FAIL)):
+        if not os.path.isdir(directory):
+            continue
+
+        for filename in os.listdir(directory):
+            if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
+
+            file_path = os.path.join(directory, filename)
+            try:
+                saved_timestamp = os.path.getmtime(file_path)
+            except OSError:
+                continue
+
+            images.append({
+                "state": state,
+                "filename": filename,
+                "saved_at": time.strftime(
+                    "%Y-%m-%d %H:%M:%S",
+                    time.localtime(saved_timestamp),
+                ),
+                "saved_timestamp": saved_timestamp,
+                "url": f"/inspection/images/{state.lower()}/{filename}",
+            })
+
+    images.sort(key=lambda item: item["saved_timestamp"], reverse=True)
+    for item in images:
+        item.pop("saved_timestamp")
+
+    return jsonify(images[:20])
+
+
+@app.route("/inspection/images/<state>/<path:filename>", methods=["GET"])
+def inspection_image_file(state, filename):
+    directory = {
+        "pass": OUTPUT_DIR_PASS,
+        "fail": OUTPUT_DIR_FAIL,
+    }.get(state.lower())
+
+    if directory is None:
+        return jsonify({"message": "지원하지 않는 검사 상태입니다."}), 404
+
+    return send_from_directory(directory, filename)
 
 
 @app.route("/inspection/stop", methods=["POST"])
