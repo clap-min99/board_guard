@@ -183,3 +183,8 @@ time.sleep(100)
 GPIO.output(12, GPIO.LOW)
 GPIO.cleanup()
 ```
+
+
+### 의식의 흐름
+
+
