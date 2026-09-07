@@ -33,8 +33,8 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | 부저 | PB4 | TIM3_CH1_PWM | AF2 | 완료 |
 | 스탭모터 4핀 | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 완료 |
 | 서보모터 | PB5 | TIM3_CH2_PWM | AF2 | 미완료 |
-| jetson(양품) | PC10 | GPIO Input | 불필요 | 인터럽트 미완료 |
-| jetson(불량품) | PC12 | GPIO Input | 불필요 | 인터럽트 미완료 |
+| jetson(양품) | PC31 | GPIO Input | 불필요 | 인터럽트 미완료 |
+| jetson(불량품) | PC33 | GPIO Input | 불필요 | 인터럽트 미완료 |
 
 ## M4 Nuclear64 PIN MAP
 | 상태 | 핀 | 설정 | 완료 여부 | 
