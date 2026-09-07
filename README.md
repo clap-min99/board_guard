@@ -27,7 +27,7 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 
 ## M4 Nuclear64 PIN MAP
 | 장치 | 핀 | 설정 | AF 필요여부 | 완료 여부 |
-| --- | --- | --- | --- |
+| --- | --- | --- | --- | --- |
 | LED(綠) | PA4 | GPIO Output | 불필요 | 완료 |
 | LED(赤) | PB8 | GPIO Output | 불필요 | 완료 |
 | 부저 | PB4 | TIM3_CH1_PWM | AF2 | 완료 |
