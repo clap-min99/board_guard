@@ -4,6 +4,7 @@
 #include "led.h"
 #include "jetson.h"
 #include "sensor_control.h"
+#include "servo.h"
 
 void Sensor_Control_Init(void)
 {
@@ -12,4 +13,5 @@ void Sensor_Control_Init(void)
 	Step_Motor_Init();
 	Alarm_Init();
 	jetson_init();
+	//Servo_Init();
 }

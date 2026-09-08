@@ -80,3 +80,7 @@ extern void SPI1_SC16IS752_Write_GPIO(unsigned int data);
 // 센서 API 모음집
 
 #include "sensor_control.h"
+
+extern void Servo_Init(void);
+extern void Servo_Push(void);
+extern void Servo_Home(void);

@@ -6,7 +6,6 @@
 void Sensor_Control_Init(void);
 
 void led_control(int on);
-void dc_motor_control(int on);
 void alarm_control(int on);
 int Alarm_Is_Playing(void);
 

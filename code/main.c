@@ -1,4 +1,4 @@
-#if 0
+#if 1
 
 #include "device_driver.h"
 #include "timer.h"
@@ -19,14 +19,19 @@ void Main(void){
     Sys_Init(115200);
     printf("\n=== individual device test ===\n");
 	for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-	alarm_control(1);
+	//alarm_control(1);
     for (;;){
 		for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-		led_control(test);
-		step_motor_control(100);
+		//led_control(test);
+		//step_motor_control(100);
+		
 		if(test == 1){
 			test = 0;
-		}else{ test = 1;}
+			Servo_Push();
+		}else{ 
+			test = 1;
+			Servo_Home();
+		}
     }
 }
 
