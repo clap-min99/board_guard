@@ -25,3 +25,4 @@ venv/
 .ipynb_checkpoints/
 *.log
 inspection_images/
+data/

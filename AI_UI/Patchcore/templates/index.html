@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCB 결함 모니터링 시스템</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="dashboard">
+        <header class="header">
+            <h1>PCB 결함 모니터링 시스템</h1>
+            <div class="inspection-control">
+                <button
+                    id="inspection-toggle"
+                    class="inspection-toggle"
+                    onclick="toggleInspection()"
+                >
+                    자동검사 중단
+                </button>
+            </div>
+        </header>
+        <div class="content-grid">
+            <section>
+                <div class="summary-grid">
+                    <article class="summary-card">
+                        <span>총 검사 수</span>
+                        <strong id="total-count">0</strong>
+                    </article>
+                    <article class="summary-card">
+                        <span>정상 수</span>
+                        <strong id="pass-count">0</strong>
+                    </article>
+                    <article class="summary-card">
+                        <span>불량 수</span>
+                        <strong id="fail-count">0</strong>
+                    </article>
+                    <article class="summary-card">
+                        <span>불량률</span>
+                        <strong id="fail-rate">0.0%</strong>
+                    </article>
+                </div>
+
+                <section class="camera-panel">
+                    <div class="camera-screen">
+                        <img src="/video_feed" alt="IP Webcam 영상">
+                        <span class="live-badge"><i class="dot"></i>LIVE</span>
+                        <div class="camera-info">
+                            <button
+                                id="side-toggle"
+                                class="side-toggle"
+                                type="button"
+                                onclick="toggleSide()"
+                            >FRONT</button>
+                            <div><span>Model</span><strong id="model-name">-</strong></div>
+                            <div><span>Device</span><strong id="device-name">-</strong></div>
+                        </div>
+                    </div>
+                </section>
+
+            </section>
+
+            <section>
+                <section class="result-panel">
+                    <div class="result-value" id="result-value">
+                        검사 시스템 준비 중
+                    </div>
+                </section>
+
+                <div class="charts-top">
+                    <article class="chart-card">
+                        <h2>현재 PCB 이상 점수</h2>
+                        <canvas id="defectChart" class="chart-canvas"></canvas>
+                        <div class="legend">
+                            <span><i style="background:#ef5964; margin:10px"></i>이상 점수</span>
+                            <span><i style="background:#28a590; margin:10px"></i>정상 범위</span>
+                        </div>
+                    </article>
+
+                    <article class="chart-card">
+                        <h2>저장 결과</h2>
+                        <div class="inspection-table-wrap">
+                            <table class="inspection-table">
+                                <thead>
+                                    <tr><th>결과</th><th>이미지</th><th>저장 시간</th></tr>
+                                </thead>
+                                <tbody id="inspection-image-list">
+                                    <tr><td colspan="3" class="empty-row">저장된 이미지가 없습니다.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </div>
+
+                <article class="chart-card trend-card">
+                    <h2>최근 검사 결과 (정상/불량)</h2>
+                    <canvas id="trendChart" class="trend-canvas"></canvas>
+                </article>
+            </section>
+        </div>
+    </main>
+
+    <dialog id="image-modal" class="image-modal" aria-label="검사 이미지 확대">
+        <div class="image-modal-header">
+            <div>
+                <span id="image-modal-state" class="result-badge-modal"></span>
+                <span id="image-modal-time"></span>
+            </div>
+            <button id="image-modal-close" type="button" aria-label="닫기" autofocus>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+            </button>
+        </div>
+        <p id="image-modal-error" role="status" hidden>이미지를 불러오지 못했습니다.</p>
+        <img id="image-modal-preview" alt="검사 이미지 원본">
+    </dialog>
+
+    <dialog id="history-modal" class="history-modal" aria-labelledby="history-modal-title">
+        <header class="history-modal-header">
+            <div class="history-modal-heading">
+                <span id="history-state-badge" class="history-state-badge pass">PASS</span>
+                <div>
+                    <p>INSPECTION ARCHIVE</p>
+                    <h2 id="history-modal-title"></h2>
+                </div>
+            </div>
+            <button id="history-modal-close" type="button" aria-label="검사 이력 닫기" autofocus>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+            </button>
+        </header>
+
+        <div class="archive-layout">
+            <div id="history-load-status" class="history-load-status" role="status" hidden>
+                <span id="history-load-message"></span>
+                <button id="history-retry" type="button" hidden>다시 시도</button>
+            </div>
+            <nav class="archive-indexes" aria-label="검사 이력 인덱스" role="tablist">
+                <button class="archive-index" style="--tab-left: 53.000%" type="button" role="tab" aria-selected="false" data-history-filter="all">
+                    <svg class="archive-folder-shape" viewBox="0 0 600 104" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                        <path class="archive-folder-paper" d="M1 102 V42 Q1 32 11 32 H292 Q298 32 301 25 L310 8 Q313 2 321 2 H539 Q547 2 550 8 L559 25 Q562 32 568 32 H589 Q599 32 599 42 V102 Z" />
+                        <path class="archive-folder-tab-fill" d="M300 32 L310 8 Q313 2 321 2 H539 Q547 2 550 8 L560 32 Z" />
+                        <path class="archive-folder-lines" d="M1 64 Q1 54 11 54 H589 Q599 54 599 64" />
+                    </svg>
+                    <span class="archive-index-tab">
+                        <span class="archive-index-code">ALL</span>
+                        <span class="archive-index-label">전체 기록</span>
+                        <strong class="archive-index-count" data-history-count="all">—</strong>
+                    </span>
+                </button>
+                <button class="archive-index" style="--tab-left: 8.833%" type="button" role="tab" aria-selected="false" data-history-filter="front">
+                    <svg class="archive-folder-shape" viewBox="0 0 600 104" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                        <path class="archive-folder-paper" d="M1 102 V42 Q1 32 11 32 H27 Q33 32 36 25 L45 8 Q48 2 56 2 H274 Q282 2 285 8 L294 25 Q297 32 303 32 H589 Q599 32 599 42 V102 Z" />
+                        <path class="archive-folder-tab-fill" d="M35 32 L45 8 Q48 2 56 2 H274 Q282 2 285 8 L295 32 Z" />
+                    </svg>
+                    <span class="archive-index-tab">
+                        <span class="archive-index-code">F</span>
+                        <span class="archive-index-label">FRONT</span>
+                        <strong class="archive-index-count" data-history-count="front">—</strong>
+                    </span>
+                </button>
+                <button class="archive-index" style="--tab-left: 46.333%" type="button" role="tab" aria-selected="false" data-history-filter="back">
+                    <svg class="archive-folder-shape" viewBox="0 0 600 104" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                        <path class="archive-folder-paper" d="M1 102 V42 Q1 32 11 32 H252 Q258 32 261 25 L270 8 Q273 2 281 2 H499 Q507 2 510 8 L519 25 Q522 32 528 32 H589 Q599 32 599 42 V102 Z" />
+                        <path class="archive-folder-tab-fill" d="M260 32 L270 8 Q273 2 281 2 H499 Q507 2 510 8 L520 32 Z" />
+                        <path class="archive-folder-lines" d="M1 64 Q1 54 11 54 H589 Q599 54 599 64" />
+                    </svg>
+                    <span class="archive-index-tab">
+                        <span class="archive-index-code">B</span>
+                        <span class="archive-index-label">BACK</span>
+                        <strong class="archive-index-count" data-history-count="back">—</strong>
+                    </span>
+                </button>
+                <button class="archive-index" style="--tab-left: 13.833%" type="button" role="tab" aria-selected="false" data-history-filter="latest">
+                    <svg class="archive-folder-shape" viewBox="0 0 600 104" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                        <path class="archive-folder-paper" d="M1 102 V42 Q1 32 11 32 H57 Q63 32 66 25 L75 8 Q78 2 86 2 H304 Q312 2 315 8 L324 25 Q327 32 333 32 H589 Q599 32 599 42 V102 Z" />
+                        <path class="archive-folder-tab-fill" d="M65 32 L75 8 Q78 2 86 2 H304 Q312 2 315 8 L325 32 Z" />
+                    </svg>
+                    <span class="archive-index-tab">
+                        <span class="archive-index-code">N</span>
+                        <span class="archive-index-label">최근 5건</span>
+                        <strong class="archive-index-count" data-history-count="latest">—</strong>
+                    </span>
+                </button>
+            </nav>
+
+            <div class="archive-drawer-front" aria-hidden="true">
+                <svg class="archive-drawer-shape" viewBox="0 0 640 91" preserveAspectRatio="none" focusable="false">
+                    <path d="M21 2 H619 L639 5 L612 90 H28 L1 5 Z" />
+                    <path d="M1 5 H639 M21 2 L22 5 M619 2 L618 5" />
+                </svg>
+                <span id="archive-drawer-label">PASS FILES</span>
+            </div>
+
+            <section id="history-sheet" class="archive-sheet" role="tabpanel" aria-live="polite" hidden>
+                <div class="archive-sheet-toolbar">
+                    <div>
+                        <span class="archive-sheet-kicker">SELECTED INDEX</span>
+                        <h3 id="history-sheet-title">전체 기록</h3>
+                    </div>
+                    <span id="history-sheet-count" class="archive-sheet-count">—</span>
+                </div>
+
+                <div class="spreadsheet-wrap">
+                    <table class="spreadsheet-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">INDEX</th>
+                                <th scope="col">검사 일시</th>
+                                <th scope="col">면</th>
+                                <th scope="col">결과</th>
+                                <th scope="col">이상 점수</th>
+                                <th scope="col">임계값</th>
+                                <th scope="col">처리 시간</th>
+                                <th scope="col">모델</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body"></tbody>
+                    </table>
+                </div>
+
+                <footer class="archive-sheet-footer">
+                    <span id="history-sheet-range">—</span>
+                    <div class="archive-pagination" aria-label="검사 이력 페이지 이동">
+                        <button id="history-prev" type="button" disabled aria-label="이전 페이지">←</button>
+                        <strong id="history-page">1</strong>
+                        <button id="history-next" type="button" disabled aria-label="다음 페이지">→</button>
+                    </div>
+                </footer>
+            </section>
+        </div>
+    </dialog>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>

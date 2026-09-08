@@ -1,11 +1,12 @@
 import cv2
 import os
-import sqlite3
 import time
 import threading
 import traceback
 import pycuda.driver as cuda
-from flask import Flask, Response, render_template_string, jsonify, send_from_directory
+from flask import Flask, Response, render_template, jsonify, send_from_directory
+from database import init_database, save_inspection, get_inspection_summary
+from history_api import history_api
 from drawing import draw_inspection_boxes
 from pcb_inspector import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, FRONT_ENGINE_PATH,
 BACK_ENGINE_PATH,EMPTY_REFERENCE_PATH,IMG_SIZE, FRONT_THRESHOLD,BACK_THRESHOLD,
@@ -14,15 +15,21 @@ OUTPUT_DIR_PASS, OUTPUT_DIR_FAIL,)
 # from database import init_database, save_fail_inspection
 
 app = Flask(__name__)
+app.register_blueprint(history_api)
 
 # 핸드폰 카메라
 CAMERA_URL = "http://172.30.6.127:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
-MODEL_NAME = "PCB-YOLOv11"
+MODEL_NAME = "Patchcore"
 DEVICE_NAME = "Jetson Orin Nano develop kit"
+MODEL_VERSIONS = {
+    "front": os.path.basename(FRONT_ENGINE_PATH),
+    "back": os.path.basename(BACK_ENGINE_PATH),
+}
 
-# init_database()
+init_database()
+persisted_summary = get_inspection_summary()
 
 cap = None
 
@@ -90,8 +97,8 @@ threading.Thread(
 ).start()
 
 inspection_stats = {
-    "pass_count": 0,
-    "fail_count": 0
+    "pass_count": persisted_summary["pass_count"],
+    "fail_count": persisted_summary["fail_count"],
 }
 
 stats_lock = threading.Lock()
@@ -99,17 +106,17 @@ inspection_enabled = threading.Event()
 inspection_enabled.set()
 # test.py의 추론 결과와 UI 통계를 저장한다.
 latest_result = {
-    "inspection_id": 0,
+    "inspection_id": persisted_summary["latest_id"],
     "state": "INSPECTING",
     "result": None,
     "message": "검사 시스템 준비 중",
     "details": None,
     "objecting_box": None,
     "bounding_box": None,
-    "check_number": 0,
-    "pass_count": 0,
-    "fail_count": 0,
-    "fail_rate": 0.0,
+    "check_number": persisted_summary["total_count"],
+    "pass_count": persisted_summary["pass_count"],
+    "fail_count": persisted_summary["fail_count"],
+    "fail_rate": persisted_summary["fail_rate"],
     "inspection_enabled": True,
     "active_side": "front",
 }
@@ -121,6 +128,18 @@ def get_camera_frame():
             return None, None
 
         return frame.copy(), frame_id
+
+
+def get_saved_image_path(state, confirmed_number):
+    """Return the current inspector's saved image path relative to this app."""
+    directory = OUTPUT_DIR_PASS if state == "PASS" else OUTPUT_DIR_FAIL
+    filename = f"inspection_{confirmed_number}_{state}.jpg"
+    image_path = os.path.join(directory, filename)
+    if not os.path.isfile(image_path):
+        return None
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.relpath(image_path, base_dir)
 
 
 def inspection_worker():
@@ -173,6 +192,7 @@ def inspection_worker():
                     reset_inspection_state()
                     last_side = active_side
 
+                inference_started_at = time.perf_counter()
                 cls, detail, boxes = get_detections(
                     image,
                     engines[active_side],
@@ -180,6 +200,10 @@ def inspection_worker():
                     thresholds[active_side],
                 )
                 result = check_loop(cls, detail, boxes, image)
+                inference_ms = round(
+                    (time.perf_counter() - inference_started_at) * 1000,
+                    2,
+                )
 
                 # 중단 요청 또는 면 변경이 추론 도중 발생했다면 낡은 결과를 버린다.
                 with stats_lock:
@@ -197,6 +221,19 @@ def inspection_worker():
                     )
 
                     if is_new_result:
+                        inspection_id = save_inspection(
+                            side=active_side,
+                            state=result["state"],
+                            score=result.get("details"),
+                            threshold=thresholds[active_side],
+                            image_path=get_saved_image_path(
+                                result["state"],
+                                confirmed_number,
+                            ),
+                            model_name=MODEL_NAME,
+                            model_version=MODEL_VERSIONS[active_side],
+                            inference_ms=inference_ms,
+                        )
                         if result["state"] == "PASS":
                             inspection_stats["pass_count"] += 1
                         else:
@@ -212,7 +249,7 @@ def inspection_worker():
                         **latest_result,
                         **result,
                         "inspection_id": (
-                            latest_result["inspection_id"] + 1
+                            inspection_id
                             if is_new_result
                             else latest_result["inspection_id"]
                         ),
@@ -283,513 +320,7 @@ def generate_frames():
 
 @app.route("/")
 def index():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="ko">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>PCB 결함 모니터링 시스템</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    </head>
-    <body>
-        <main class="dashboard">
-            <header class="header">
-                <h1>PCB 결함 모니터링 시스템</h1>
-                <div class="inspection-control">
-                    <button
-                        id="inspection-toggle"
-                        class="inspection-toggle"
-                        onclick="toggleInspection()"
-                    >
-                        자동검사 중단
-                    </button>
-                </div>
-            </header>
-            <div class="content-grid">
-                <section>
-                    <div class="summary-grid">
-                        <article class="summary-card">
-                            <span>총 검사 수</span>
-                            <strong id="total-count">0</strong>
-                        </article>
-                        <article class="summary-card">
-                            <span>정상 수</span>
-                            <strong id="pass-count">0</strong>
-                        </article>
-                        <article class="summary-card">
-                            <span>불량 수</span>
-                            <strong id="fail-count">0</strong>
-                        </article>
-                        <article class="summary-card">
-                            <span>불량률</span>
-                            <strong id="fail-rate">0.0%</strong>
-                        </article>
-                    </div>
-
-                    <section class="camera-panel">
-                        <div class="camera-screen">
-                            <img src="/video_feed" alt="IP Webcam 영상">
-                            <span class="live-badge"><i class="dot"></i>LIVE</span>
-                            <div class="camera-info">
-                                <button
-                                    id="side-toggle"
-                                    class="side-toggle"
-                                    type="button"
-                                    onclick="toggleSide()"
-                                >FRONT</button>
-                                <div><span>Model</span><strong id="model-name">-</strong></div>
-                                <div><span>Device</span><strong id="device-name">-</strong></div>
-                            </div>
-                        </div>
-                    </section>
-
-                </section>
-
-                <section>
-                    <section class="result-panel">
-                        <div class="result-value" id="result-value">
-                            검사 시스템 준비 중
-                        </div>
-                    </section>
-
-                    <div class="charts-top">
-                        <article class="chart-card">
-                            <h2>현재 PCB 이상 점수</h2>
-                            <canvas id="defectChart" class="chart-canvas"></canvas>
-                            <div class="legend">
-                                <span><i style="background:#ef5964; margin:10px"></i>이상 점수</span>
-                                <span><i style="background:#28a590; margin:10px"></i>정상 범위</span>
-                            </div>
-                        </article>
-
-                        <article class="chart-card">
-                            <h2>최근 저장 이미지</h2>
-                            <div class="inspection-table-wrap">
-                                <table class="inspection-table">
-                                    <thead>
-                                        <tr><th>결과</th><th>이미지</th><th>저장 시간</th></tr>
-                                    </thead>
-                                    <tbody id="inspection-image-list">
-                                        <tr><td colspan="3" class="empty-row">저장된 이미지가 없습니다.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </article>
-                    </div>
-
-                    <article class="chart-card trend-card">
-                        <h2>최근 검사 결과 (정상/불량)</h2>
-                        <canvas id="trendChart" class="trend-canvas"></canvas>
-                    </article>
-                </section>
-            </div>
-        </main>
-
-        <dialog id="image-modal" class="image-modal" aria-label="검사 이미지 확대">
-            <div class="image-modal-header">
-                <div>
-                    <span id="image-modal-state" class="result-badge"></span>
-                    <span id="image-modal-time"></span>
-                </div>
-                <button id="image-modal-close" type="button" aria-label="닫기" autofocus>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
-                        <path d="M6 6l12 12M18 6L6 18" />
-                    </svg>
-                </button>
-            </div>
-            <p id="image-modal-error" role="status" hidden>이미지를 불러오지 못했습니다.</p>
-            <img id="image-modal-preview" alt="검사 이미지 원본">
-        </dialog>
-
-        <script>
-            const imageModal = document.getElementById('image-modal');
-            const modalPreview = document.getElementById('image-modal-preview');
-            const modalError = document.getElementById('image-modal-error');
-            let inspectionImages = [];
-            let currentModalImageIndex = -1;
-
-            function fitImageModal() {
-                if (!imageModal.open || !modalPreview.naturalWidth || modalPreview.hidden) return;
-                const maxWidth = document.documentElement.clientWidth * 0.96;
-                const maxHeight = window.innerHeight * 0.96;
-                const style = getComputedStyle(imageModal);
-                const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-                const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-                imageModal.style.width = `${maxWidth}px`;
-                // 폭이 줄어 헤더가 줄바꿈되는 경우에도 이미지 전체가 화면에 들어오게 한다.
-                for (let i = 0; i < 3; i++) {
-                    const headerHeight = imageModal.querySelector('.image-modal-header').getBoundingClientRect().height;
-                    const scale = Math.min(
-                        Math.max(1, maxWidth - horizontalPadding) / modalPreview.naturalWidth,
-                        Math.max(1, maxHeight - verticalPadding - headerHeight) / modalPreview.naturalHeight
-                    );
-                    imageModal.style.width = `${modalPreview.naturalWidth * scale + horizontalPadding}px`;
-                }
-            }
-
-            modalPreview.addEventListener('load', fitImageModal);
-            window.addEventListener('resize', fitImageModal);
-
-            function openInspectionImage(index) {
-                if (index < 0 || index >= inspectionImages.length) return;
-
-                currentModalImageIndex = index;
-                const item = inspectionImages[index];
-                const state = document.getElementById('image-modal-state');
-                state.textContent = item.state;
-                state.className = `result-badge ${item.state.toLowerCase()}`;
-                document.getElementById('image-modal-time').textContent = item.saved_at;
-                modalError.hidden = true;
-                modalPreview.hidden = false;
-                modalPreview.alt = `${item.state} 검사 이미지 · ${item.saved_at}`;
-                modalPreview.src = item.url;
-                if (!imageModal.open) {
-                    imageModal.showModal();
-                    document.body.classList.add('image-modal-open');
-                }
-                if (modalPreview.complete) fitImageModal();
-            }
-
-            document.addEventListener('keydown', (event) => {
-                if (!imageModal.open || event.altKey || event.ctrlKey || event.metaKey) return;
-
-                if (event.key === 'ArrowLeft') {
-                    event.preventDefault();
-                    openInspectionImage(currentModalImageIndex - 1);
-                } else if (event.key === 'ArrowRight') {
-                    event.preventDefault();
-                    openInspectionImage(currentModalImageIndex + 1);
-                }
-            });
-
-            modalPreview.addEventListener('error', () => {
-                modalPreview.hidden = true;
-                modalError.hidden = false;
-            });
-            document.getElementById('image-modal-close').addEventListener('click', () => imageModal.close());
-            imageModal.addEventListener('click', (event) => {
-                const bounds = imageModal.getBoundingClientRect();
-                if (event.target === imageModal && (
-                    event.clientX < bounds.left || event.clientX > bounds.right ||
-                    event.clientY < bounds.top || event.clientY > bounds.bottom
-                )) imageModal.close();
-            });
-            imageModal.addEventListener('close', () => {
-                document.body.classList.remove('image-modal-open');
-                currentModalImageIndex = -1;
-            });
-
-            function displayInspectionResult(data) {
-            const resultElement = document.getElementById('result-value');
-
-            switch (data.state) {
-                case 'PASS':
-                    resultElement.textContent = `정상 · ${data.message}`;
-                    resultElement.style.color = '#28a590';
-                    break;
-
-                case 'FAIL':
-                    resultElement.textContent =
-                        `불량 · ${data.details ?? data.message}`;
-                    resultElement.style.color = '#ef5964';
-                    break;
-
-                case 'MISSING':
-                    resultElement.textContent = 'PCB가 감지되지 않았습니다.';
-                    resultElement.style.color = '#f59e0b';
-                    break;
-
-                case 'INSPECTING':
-                    resultElement.textContent = '검사 중...';
-                    resultElement.style.color = '#6175ff';
-                    break;
-
-                case 'STOPPED':
-                    resultElement.textContent = '자동검사가 중단되었습니다.';
-                    resultElement.style.color = '#ef5964';
-                    break;
-
-                case 'CAMERA_ERROR':
-                    resultElement.textContent = '카메라 연결에 실패했습니다.';
-                    resultElement.style.color = '#ef5964';
-                    break;
-
-                case 'MODEL_ERROR':
-                    resultElement.textContent = data.message;
-                    resultElement.style.color = '#ef5964';
-                    break;
-
-                default:
-                    resultElement.textContent = '알 수 없는 검사 상태';
-                    resultElement.style.color = '#64748b';
-            }
-            }
-
-            function updateCharts(data) {
-                if (data.state === 'MISSING') {
-                    return;
-                }
-
-                const detail = Number(data.details);
-                const anomalyPercent = Number.isFinite(detail)
-                    ? Math.max(0, Math.min(100, detail * 100))
-                    : 0;
-                defectChart.data.datasets[0].data = [
-                    anomalyPercent,
-                    100 - anomalyPercent
-                ];
-                defectChart.update();
-
-                trendChart.data.labels.push(`${data.check_number}번`);
-                trendChart.data.datasets[0].data.push(data.state === 'PASS' ? 1 : 0);
-                if (trendChart.data.labels.length > 8) {
-                    trendChart.data.labels.shift();
-                    trendChart.data.datasets[0].data.shift();
-                }
-                trendChart.update();
-            }
-
-            async function fetchInspectionImages() {
-                try {
-                    const response = await fetch('/inspection/images');
-                    if (!response.ok) throw new Error(`저장 이미지 조회 실패: ${response.status}`);
-
-                    const images = await response.json();
-                    const currentModalImageUrl = imageModal.open
-                        ? inspectionImages[currentModalImageIndex]?.url
-                        : null;
-                    inspectionImages = images;
-                    if (currentModalImageUrl) {
-                        currentModalImageIndex = inspectionImages.findIndex(
-                            (item) => item.url === currentModalImageUrl
-                        );
-                    }
-                    const tableBody = document.getElementById('inspection-image-list');
-                    tableBody.replaceChildren();
-
-                    if (images.length === 0) {
-                        const row = document.createElement('tr');
-                        const cell = document.createElement('td');
-                        cell.colSpan = 3;
-                        cell.className = 'empty-row';
-                        cell.textContent = '저장된 이미지가 없습니다.';
-                        row.appendChild(cell);
-                        tableBody.appendChild(row);
-                        return;
-                    }
-
-                    for (const [index, item] of images.entries()) {
-                        const row = document.createElement('tr');
-                        const stateCell = document.createElement('td');
-                        const badge = document.createElement('span');
-                        badge.className = `result-badge ${item.state.toLowerCase()}`;
-                        badge.textContent = item.state;
-                        stateCell.appendChild(badge);
-
-                        const imageCell = document.createElement('td');
-                        const link = document.createElement('button');
-                        link.type = 'button';
-                        link.className = 'inspection-image-button';
-                        link.setAttribute('aria-label', `${item.state} ${item.saved_at} 이미지 확대`);
-                        link.setAttribute('aria-haspopup', 'dialog');
-                        link.addEventListener('click', () => openInspectionImage(index));
-                        const preview = document.createElement('img');
-                        preview.className = 'inspection-thumbnail';
-                        preview.src = item.url;
-                        preview.alt = `${item.state} 검사 이미지`;
-                        link.appendChild(preview);
-                        imageCell.appendChild(link);
-
-                        const timeCell = document.createElement('td');
-                        timeCell.textContent = item.saved_at;
-                        row.append(stateCell, imageCell, timeCell);
-                        tableBody.appendChild(row);
-                    }
-                } catch (error) {
-                    console.error(error);
-                }
-            }
-
-            let lastInspectionId = 0;
-            let isPolling = false;
-            let inspectionEnabled = true;
-            let activeSide = 'front';
-
-            function updateSideControl(data) {
-                if (!data.active_side) return;
-
-                activeSide = data.active_side;
-                const button = document.getElementById('side-toggle');
-                button.textContent = activeSide.toUpperCase();
-                button.classList.toggle('is-back', activeSide === 'back');
-            }
-
-            async function toggleSide() {
-                const button = document.getElementById('side-toggle');
-                button.disabled = true;
-
-                try {
-                    const nextSide = activeSide === 'front' ? 'back' : 'front';
-                    const response = await fetch(`/inspection/side/${nextSide}`, {
-                        method: 'POST'
-                    });
-                    if (!response.ok) {
-                        throw new Error(`검사 면 변경 실패: ${response.status}`);
-                    }
-
-                    updateSideControl(await response.json());
-                } catch (error) {
-                    console.error(error);
-                    alert('검사 면을 변경하지 못했습니다.');
-                } finally {
-                    button.disabled = false;
-                }
-            }
-
-            function updateInspectionControl(data) {
-                const button = document.getElementById('inspection-toggle');
-                inspectionEnabled = data.inspection_enabled;
-                button.textContent = inspectionEnabled
-                    ? '자동검사 중단'
-                    : '자동검사 재개';
-                button.classList.toggle('is-stopped', !inspectionEnabled);
-            }
-
-            async function toggleInspection() {
-                const button = document.getElementById('inspection-toggle');
-                button.disabled = true;
-
-                try {
-                    const endpoint = inspectionEnabled
-                        ? '/inspection/stop'
-                        : '/inspection/start';
-                    const response = await fetch(endpoint, { method: 'POST' });
-                    if (!response.ok) {
-                        throw new Error(`검사 제어 실패: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    displayInspectionResult(data);
-                    updateInspectionControl(data);
-                } catch (error) {
-                    console.error(error);
-                    alert('자동검사 상태를 변경하지 못했습니다.');
-                } finally {
-                    button.disabled = false;
-                }
-            }
-
-            async function fetchLatestInspection() {
-                if (isPolling) return;
-                isPolling = true;
-                try {
-                    const response = await fetch('/inspection');
-                    if (!response.ok) {
-                        throw new Error(`결과 조회 실패: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    displayInspectionResult(data);
-                    updateInspectionControl(data);
-                    updateSideControl(data);
-                    document.getElementById('total-count').textContent = data.check_number;
-                    document.getElementById('pass-count').textContent = data.pass_count;
-                    document.getElementById('fail-count').textContent = data.fail_count;
-                    document.getElementById('fail-rate').textContent = `${data.fail_rate}%`;
-                    document.getElementById('model-name').textContent = data.model_name;
-                    document.getElementById('device-name').textContent = data.device_name;
-
-                    if (data.inspection_id > lastInspectionId && data.state !== 'INSPECTING') {
-                        updateCharts(data);
-                        if (data.state === 'PASS' || data.state === 'FAIL') {
-                            fetchInspectionImages();
-                        }
-                        lastInspectionId = data.inspection_id;
-                        console.log('자동 검사 결과:', data);
-                    }
-                } catch (error) {
-                    const resultElement = document.getElementById('result-value');
-                    resultElement.textContent = '검사 결과를 불러오지 못했습니다.';
-                    resultElement.style.color = '#ef5964';
-                    console.error(error);
-                } finally {
-                    isPolling = false;
-                }
-            }
-
-            fetchLatestInspection();
-            fetchInspectionImages();
-            setInterval(fetchLatestInspection, 500);
-
-            const defectChart = new Chart(document.getElementById('defectChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: ['이상 점수', '정상 범위'],
-                    datasets: [{
-                        data: [0, 100],
-                        backgroundColor: ['#ef5964', '#28a590'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '62%',
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { enabled: true }
-                    }
-                }
-            });
-
-            const trendChart = new Chart(document.getElementById('trendChart'), {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        borderColor: '#6175ff',
-                        backgroundColor: 'rgba(97,117,255,0.18)',
-                        fill: true,
-                        tension: 0.35,
-                        borderWidth: 3,
-                        pointRadius: 5,
-                        pointHoverRadius: 6,
-                        pointBackgroundColor: '#6175ff',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            min: 0,
-                            max: 1,
-                            grid: { color: '#28324a' },
-                            ticks: {
-                                stepSize: 1,
-                                color: '#9ba8bc',
-                                callback: (value) => value === 1 ? '정상' : '불량'
-                            }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#9ba8bc' }
-                        }
-                    }
-                }
-            });
-        </script>
-    </body>
-    </html>
-    """)
+    return render_template("index.html")
 
 
 @app.route("/video_feed")
