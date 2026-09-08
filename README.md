@@ -32,17 +32,20 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | 스탭모터 4핀 | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 미사용 |
 | 스탭모터 2핀 | PA6(PUL)/PA7(DIR) | GPIO Output | 불필요 | 완료 |
 | 서보모터 | PB5 | TIM3_CH2_PWM | AF2 | 미완료 |
-| jetson(move_control) | P29 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
-| jetson(PASS) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
-| jetson(PAIL) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(STOP) | P29 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(PASS->MOVE) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(PAIL->MOVE) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
 
 # 2. 상태 및 이벤트
 
 ```
 typedef enum {
-    STATE_IDLE,
-    STATE_NORMAL,
-    STATE_FAIL,
+      STATE_RUN
+          컨베이어 동작 중
+      STATE_INSPECT
+          컨베이어 정지 + Jetson 검사 중
+      STATE_FAIL
+          FAIL 처리 중
 } SystemState;
 
 EVENT_IDLE()
@@ -76,30 +79,26 @@ EVENT_FAIL()
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
 # 2.4  구조
 ```
-                 Jetson
-                   │
-            ROI >= 80%
-                   │
-                   ▼
-              GPIO33
-                   │
-                   ▼
-             Conveyor STOP
-                   │
-                   ▼
-             60 frame 검사
-                /       \
-             PASS       FAIL
-              │           │
-              │        Servo PUSH
-              │        Servo HOME
-              │           │
-              └─────┬─────┘
-                    │
-                 GPIO31
-                    │
-                    ▼
-              Conveyor START
+                  전원 ON
+                     ↓
+                 STATE_RUN
+                     │
+                     │ PC12(STOP)
+                     ▼
+               STATE_INSPECT
+                  /       \
+         PC11(완료)       PC10(FAIL)
+              │               │
+              │               ▼
+              │           STATE_FAIL
+              │               │
+              │           Servo 처리
+              │               │
+              │          PC11(완료)
+              │               │
+              └───────┬───────┘
+                      ▼
+                  STATE_RUN
 ```
 # 2.5 흐름
 
@@ -126,7 +125,75 @@ Queue에서 이벤트를 꺼냄
     ↓
 상태 전이 및 장치 함수 호출
 ````
+# 2.5.1 PASS 흐름
+```
+① 부팅
+   ↓
+STATE_RUN
+   ↓
+Step_Motor_Run()
 
+② PCB가 ROI 80% 진입
+
+Jetson P33
+→ STM32 PC12
+→ EXTI12
+→ STOP 이벤트
+
+③ STATE_INSPECT
+
+Step_Motor_Stop()
+
+④ Jetson 60 frame 검사
+
+⑤ PASS
+
+Jetson P31
+→ STM32 PC11
+→ RESUME 이벤트
+
+⑥ STATE_RUN
+
+Step_Motor_Run()
+```
+
+# 2.5.2 FAIL 흐름
+```
+① STATE_RUN
+   ↓
+PCB 진입
+
+② P33 → PC12
+
+STOP
+↓
+STATE_INSPECT
+↓
+컨베이어 정지
+
+③ 60 frame 검사
+
+④ FAIL 확정
+
+P29 → PC10
+↓
+FAIL 이벤트
+↓
+STATE_FAIL
+
+⑤ 빨간 LED
+   부저
+   Servo PUSH
+   Servo HOME
+
+⑥ Jetson P31 → PC11
+
+RESUME
+↓
+STATE_RUN
+↓
+컨베이어 재가동
+```
 # 3. 스탭모터
 
 | 항목 | 결정 내용 |
