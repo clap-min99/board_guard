@@ -16,8 +16,6 @@
       GPIO PIN 제어
 
 # 1. 시스템 구성 및 하드웨어 리소스 배정
-
-
 ```
 JETSON ORIN NANO Developer Kit           M4 Nuclear64  
 ─────────────────                       ─────────────────
