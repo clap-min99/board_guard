@@ -45,7 +45,9 @@
                 <section class="camera-panel">
                     <div class="camera-screen">
                         <img src="/video_feed" alt="IP Webcam 영상">
-                        <span class="live-badge"><i class="dot"></i>LIVE</span>
+                        <span id="camera-status-badge" class="live-badge" data-state="connecting" role="status" aria-live="polite">
+                            <i class="dot" aria-hidden="true"></i><span id="camera-status-label">CONNECTING</span>
+                        </span>
                         <div class="camera-info">
                             <button
                                 id="side-toggle"
@@ -94,7 +96,8 @@
                 </div>
 
                 <article class="chart-card trend-card">
-                    <h2>최근 검사 결과 (정상/불량)</h2>
+                    <h2>최근 검사 결과 (정상/불량 · 최대 10건)</h2>
+                    <p id="recent-inspection-range" class="recent-inspection-range" role="status">검사 이력을 불러오는 중입니다.</p>
                     <canvas id="trendChart" class="trend-canvas"></canvas>
                 </article>
             </section>

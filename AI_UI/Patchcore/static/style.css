@@ -161,6 +161,14 @@ h1 {
     letter-spacing: 1px;
 }
 
+.live-badge[data-state="live"] { color: #6ee7b7; }
+.live-badge[data-state="connecting"],
+.live-badge[data-state="reconnecting"] { color: #fbbf24; }
+.live-badge[data-state="offline"],
+.live-badge[data-state="server-offline"] { color: #fca5a5; }
+.live-badge[data-state="paused"] { color: #cbd5e1; }
+.live-badge .dot { background: currentColor; }
+
 .camera-info {
     position: absolute;
     left: 14px;
@@ -972,6 +980,12 @@ body.history-modal-open { overflow: hidden; }
 
 .trend-card {
     min-height: 310px;
+}
+
+.recent-inspection-range {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: 12px;
 }
 
 .trend-chart {

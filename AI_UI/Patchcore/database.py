@@ -123,6 +123,20 @@ def get_inspection_summary():
     }
 
 
+def get_recent_inspections():
+    """Return the latest ten persisted PASS/FAIL results across both sides."""
+    with closing(_connect()) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, inspected_at, state
+            FROM inspections
+            ORDER BY inspected_at DESC, id DESC
+            LIMIT 10
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_inspection_history(*, state, filter="all", page=1, page_size=20):
     """Read counts and a page of confirmed results from one DB snapshot."""
     if state not in ("PASS", "FAIL"):

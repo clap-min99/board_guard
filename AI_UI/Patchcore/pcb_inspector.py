@@ -18,6 +18,7 @@ import cv2
 import os
 import threading
 import time
+import uuid
 import numpy as np
 import pycuda.autoinit  # noqa: F401
 
@@ -36,6 +37,7 @@ loop_count = 1
 _missing_check = 1    
 _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
 _inspection_state_lock = threading.RLock()
+INSPECTION_SESSION_ID = uuid.uuid4().hex
 
 # ============================================================
 # 설정
@@ -74,6 +76,11 @@ BUTTON_MARGIN = 10
 OUTPUT_DIR = os.path.join(BASE_DIR, "inspection_images")
 OUTPUT_DIR_FAIL = os.path.join(OUTPUT_DIR, "fail")
 OUTPUT_DIR_PASS = os.path.join(OUTPUT_DIR, "pass")
+
+
+def get_inspection_image_filename(check_number, state):
+    """Return a filename that cannot collide after an application restart."""
+    return f"inspection_{INSPECTION_SESSION_ID}_{check_number}_{state}.jpg"
 
 # ============================================================
 # lol
@@ -173,7 +180,7 @@ def _check_loop_unlocked(cls, detail, boxes, frame):
                     if _l_state == "PASS": # 정상 검출 됬음.
                         check_number += 1
 
-                        FILE_NAME = f"inspection_{check_number}_PASS.jpg"
+                        FILE_NAME = get_inspection_image_filename(check_number, "PASS")
                         OUTPUT_PATH = os.path.join(OUTPUT_DIR_PASS,FILE_NAME)
                         os.makedirs(OUTPUT_DIR_PASS, exist_ok=True)
                         saved = cv2.imwrite(OUTPUT_PATH, frame)
@@ -184,7 +191,7 @@ def _check_loop_unlocked(cls, detail, boxes, frame):
                     elif _l_state == "FAIL": # 비정상이래요.
                         check_number += 1
 
-                        FILE_NAME = f"inspection_{check_number}_FAIL.jpg"
+                        FILE_NAME = get_inspection_image_filename(check_number, "FAIL")
                         OUTPUT_PATH = os.path.join(OUTPUT_DIR_FAIL,FILE_NAME)
                         os.makedirs(OUTPUT_DIR_FAIL, exist_ok=True)
 

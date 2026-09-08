@@ -265,11 +265,7 @@ switch (data.state) {
 }
 }
 
-function updateCharts(data) {
-    if (data.state === 'MISSING') {
-        return;
-    }
-
+function updateAnomalyChart(data) {
     const detail = Number(data.details);
     const anomalyPercent = Number.isFinite(detail)
         ? Math.max(0, Math.min(100, detail * 100))
@@ -279,14 +275,29 @@ function updateCharts(data) {
         100 - anomalyPercent
     ];
     defectChart.update();
+}
 
-    trendChart.data.labels.push(`${data.check_number}번`);
-    trendChart.data.datasets[0].data.push(data.state === 'PASS' ? 1 : 0);
-    if (trendChart.data.labels.length > 8) {
-        trendChart.data.labels.shift();
-        trendChart.data.datasets[0].data.shift();
-    }
+let recentInspectionSignature = null;
+
+function updateRecentInspectionChart(rows) {
+    // The API returns newest first; the graph runs from oldest to newest.
+    const recent = rows.slice(0, 10).reverse();
+    const range = document.getElementById('recent-inspection-range');
+    const formatTime = (value) => new Date(value).toLocaleString('ko-KR', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+        second: '2-digit', hour12: false
+    });
+    const rangeText = recent.length
+        ? `${recent.length}건 · ${formatTime(recent[0].inspected_at)} ~ ${formatTime(recent[recent.length - 1].inspected_at)}`
+        : '저장된 검사 결과가 없습니다.';
+    if (range.textContent !== rangeText) range.textContent = rangeText;
+
+    const signature = JSON.stringify(recent);
+    if (signature === recentInspectionSignature) return;
+    trendChart.data.labels = recent.map((row) => `${row.id}번`);
+    trendChart.data.datasets[0].data = recent.map((row) => row.state === 'PASS' ? 1 : 0);
     trendChart.update();
+    recentInspectionSignature = signature;
 }
 
 async function fetchInspectionImages() {
@@ -423,19 +434,45 @@ async function toggleInspection() {
     }
 }
 
+function updateCameraBadge(data) {
+    const statuses = {
+        live: ['LIVE', '카메라 영상 수신 중'],
+        connecting: ['CONNECTING', '카메라 연결 중'],
+        reconnecting: ['RECONNECTING', '영상 수신이 멈춰 카메라 재연결 대기 중'],
+        offline: ['OFFLINE', '카메라 연결 끊김'],
+        paused: ['LIVE · 검사 중단', '카메라 영상 수신 중 · 자동검사 중단'],
+        'server-offline': ['SERVER OFFLINE', '서버에 연결할 수 없습니다.']
+    };
+    let state = data.camera_state;
+    if (!(state in statuses)) state = 'connecting';
+    if (state === 'live' && data.inspection_enabled === false) state = 'paused';
+    const badge = document.getElementById('camera-status-badge');
+    const label = document.getElementById('camera-status-label');
+    const [text, description] = statuses[state];
+    if (label.textContent !== text) label.textContent = text;
+    badge.dataset.state = state;
+    badge.title = description;
+}
+
 async function fetchLatestInspection() {
     if (isPolling) return;
     isPolling = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let receivedInspection = false;
     try {
-        const response = await fetch('/inspection');
+        const response = await fetch('/inspection', { signal: controller.signal, cache: 'no-store' });
         if (!response.ok) {
             throw new Error(`결과 조회 실패: ${response.status}`);
         }
 
         const data = await response.json();
+        receivedInspection = true;
+        updateCameraBadge(data);
         displayInspectionResult(data);
         updateInspectionControl(data);
         updateSideControl(data);
+        updateRecentInspectionChart(data.recent_inspections);
         document.getElementById('total-count').textContent = data.check_number;
         document.getElementById('pass-count').textContent = data.pass_count;
         document.getElementById('fail-count').textContent = data.fail_count;
@@ -443,27 +480,28 @@ async function fetchLatestInspection() {
         document.getElementById('model-name').textContent = data.model_name;
         document.getElementById('device-name').textContent = data.device_name;
 
-        if (data.inspection_id > lastInspectionId && data.state !== 'INSPECTING') {
-            updateCharts(data);
+        if (data.inspection_id > lastInspectionId) {
             if (data.state === 'PASS' || data.state === 'FAIL') {
-                fetchInspectionImages();
+                updateAnomalyChart(data);
             }
+            fetchInspectionImages();
             lastInspectionId = data.inspection_id;
             console.log('자동 검사 결과:', data);
         }
     } catch (error) {
+        if (!receivedInspection) {
+            updateCameraBadge({ camera_state: 'server-offline' });
+            document.getElementById('recent-inspection-range').textContent = '최근 검사 결과를 갱신하지 못했습니다.';
+        }
         const resultElement = document.getElementById('result-value');
         resultElement.textContent = '검사 결과를 불러오지 못했습니다.';
         resultElement.style.color = '#ef5964';
         console.error(error);
     } finally {
+        clearTimeout(timeout);
         isPolling = false;
     }
 }
-
-fetchLatestInspection();
-fetchInspectionImages();
-setInterval(fetchLatestInspection, 500);
 
 const defectChart = new Chart(document.getElementById('defectChart'), {
     type: 'doughnut',
@@ -528,3 +566,7 @@ const trendChart = new Chart(document.getElementById('trendChart'), {
         }
     }
 });
+
+fetchLatestInspection();
+fetchInspectionImages();
+setInterval(fetchLatestInspection, 500);

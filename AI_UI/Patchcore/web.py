@@ -5,10 +5,10 @@ import threading
 import traceback
 import pycuda.driver as cuda
 from flask import Flask, Response, render_template, jsonify, send_from_directory
-from database import init_database, save_inspection, get_inspection_summary
+from database import init_database, save_inspection, get_inspection_summary, get_recent_inspections
 from history_api import history_api
 from drawing import draw_inspection_boxes
-from pcb_inspector import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, FRONT_ENGINE_PATH,
+from pcb_inspector import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, get_inspection_image_filename, FRONT_ENGINE_PATH,
 BACK_ENGINE_PATH,EMPTY_REFERENCE_PATH,IMG_SIZE, FRONT_THRESHOLD,BACK_THRESHOLD,
 OUTPUT_DIR_PASS, OUTPUT_DIR_FAIL,)
 
@@ -21,6 +21,8 @@ app.register_blueprint(history_api)
 CAMERA_URL = "http://172.30.6.127:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
+CAMERA_STALE_SECONDS = 3
+CAMERA_OFFLINE_SECONDS = 10
 MODEL_NAME = "Patchcore"
 DEVICE_NAME = "Jetson Orin Nano develop kit"
 MODEL_VERSIONS = {
@@ -38,11 +40,33 @@ camera_error = False
 frame_id = 0
 frame_lock = threading.Lock()
 camera_fps = 0.0
+camera_started_at = time.monotonic()
+last_camera_frame_at = None
 cnt = 1
 
 
+def get_camera_status():
+    """Report camera health even when OpenCV is blocked waiting for a frame."""
+    with frame_lock:
+        age = time.monotonic() - (
+            last_camera_frame_at if last_camera_frame_at is not None else camera_started_at
+        )
+        if frame is not None and age < CAMERA_STALE_SECONDS:
+            state = "live"
+        elif camera_error or age >= CAMERA_OFFLINE_SECONDS:
+            state = "offline"
+        elif last_camera_frame_at is not None:
+            state = "reconnecting"
+        else:
+            state = "connecting"
+        return {
+            "camera_state": state,
+            "camera_fps": camera_fps if state == "live" else 0.0,
+        }
+
+
 def camera_thread():
-    global cap, frame, camera_error, camera_fps, frame_id
+    global cap, frame, camera_error, camera_fps, frame_id, last_camera_frame_at
     retry_count = 0
     fps_frame_count = 0
     fps_started_at = time.monotonic()
@@ -55,9 +79,10 @@ def camera_thread():
 
             if not cap.isOpened():
                 retry_count += 1
-                camera_error = retry_count >= CAMERA_MAX_RETRIES
-                camera_fps = 0.0
-                frame = None
+                with frame_lock:
+                    camera_error = retry_count >= CAMERA_MAX_RETRIES
+                    camera_fps = 0.0
+                    frame = None
                 time.sleep(CAMERA_RETRY_INTERVAL)
                 continue
 
@@ -67,26 +92,30 @@ def camera_thread():
         ret, img = cap.read()
 
         if ret:
+            received_at = time.monotonic()
+            fps_frame_count += 1
+            fps_elapsed = received_at - fps_started_at
             with frame_lock:
                 frame = img
                 frame_id += 1
+                last_camera_frame_at = received_at
+                camera_error = False
+                if fps_elapsed >= 1.0:
+                    camera_fps = round(fps_frame_count / fps_elapsed, 1)
             retry_count = 0
-            camera_error = False
-            fps_frame_count += 1
-            fps_elapsed = time.monotonic() - fps_started_at
             if fps_elapsed >= 1.0:
-                camera_fps = round(fps_frame_count / fps_elapsed, 1)
                 fps_frame_count = 0
-                fps_started_at = time.monotonic()
+                fps_started_at = received_at
             continue
 
         # 연결이 끊기면 현재 영상을 비우고 다음 반복에서 재연결한다.
         retry_count += 1
-        camera_error = retry_count >= CAMERA_MAX_RETRIES
-        camera_fps = 0.0
+        with frame_lock:
+            camera_error = retry_count >= CAMERA_MAX_RETRIES
+            camera_fps = 0.0
+            frame = None
         fps_frame_count = 0
         fps_started_at = time.monotonic()
-        frame = None
         cap.release()
         time.sleep(CAMERA_RETRY_INTERVAL)
 
@@ -133,7 +162,7 @@ def get_camera_frame():
 def get_saved_image_path(state, confirmed_number):
     """Return the current inspector's saved image path relative to this app."""
     directory = OUTPUT_DIR_PASS if state == "PASS" else OUTPUT_DIR_FAIL
-    filename = f"inspection_{confirmed_number}_{state}.jpg"
+    filename = get_inspection_image_filename(confirmed_number, state)
     image_path = os.path.join(directory, filename)
     if not os.path.isfile(image_path):
         return None
@@ -337,13 +366,15 @@ def inspection():
     with stats_lock:
         result = dict(latest_result)
 
+    camera_status = get_camera_status()
+    result.update(camera_status)
     result.update({
-        "camera_fps": camera_fps,
+        "recent_inspections": get_recent_inspections(),
         "model_name": MODEL_NAME,
         "device_name": DEVICE_NAME,
     })
 
-    if camera_error:
+    if camera_status["camera_state"] == "offline":
         result.update({
             "state": "CAMERA_ERROR",
             "result": None,
