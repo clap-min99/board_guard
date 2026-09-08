@@ -29,9 +29,9 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | LED(綠) | PA4 | GPIO Output | 불필요 | 완료 |
 | LED(赤) | PA0 | GPIO Output | 불필요 | 완료 |
 | 부저 | PB4 | TIM3_CH1_PWM | AF2 | 완료 |
-| 스탭모터 4핀 | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 미사용 |
+| ~~스탭모터 4핀~~ | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 미사용 |
 | 스탭모터 2핀 | PA6(PUL)/PA7(DIR) | GPIO Output | 불필요 | 완료 |
-| 서보모터 | PB5 | TIM3_CH2_PWM | AF2 | 미완료 |
+| 서보모터 | PB5 |GPIO Output / TIM2 CC2 timing | AF2 | 미완료 |
 | jetson(STOP) | P29 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
 | jetson(PASS->MOVE) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
 | jetson(PAIL->MOVE) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
