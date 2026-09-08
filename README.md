@@ -32,8 +32,9 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | 스탭모터 4핀 | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 미사용 |
 | 스탭모터 2핀 | PA6(PUL)/PA7(DIR) | GPIO Output | 불필요 | 완료 |
 | 서보모터 | PB5 | TIM3_CH2_PWM | AF2 | 미완료 |
-| jetson(양품) | P31 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
-| jetson(불량품) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(move_control) | P29 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(PASS) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(PAIL) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
 
 # 2. 상태 및 이벤트
 
@@ -73,44 +74,74 @@ EVENT_FAIL()
 | EVENT_FAIL | LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On |
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
-
-# 2.4 전체 흐름
+# 2.4  구조
+```
+                 Jetson
+                   │
+            ROI >= 80%
+                   │
+                   ▼
+              GPIO33
+                   │
+                   ▼
+             Conveyor STOP
+                   │
+                   ▼
+             60 frame 검사
+                /       \
+             PASS       FAIL
+              │           │
+              │        Servo PUSH
+              │        Servo HOME
+              │           │
+              └─────┬─────┘
+                    │
+                 GPIO31
+                    │
+                    ▼
+              Conveyor START
+```
+# 2.5 흐름
 
 ```
-1. 최초 부팅 STATE_IDLE 스탭모터 ▷ One cycle
-2. PCB 판단 시작
-    2.1 양품 결정 
-        2.1.1 JETSON PIN31 GPIO HIGH - > (PC10 INTERRUPT)
-        2.1.2 STATE_NORMAL 진입, Queue에 이벤트 push
-        2.1.3 Queue 읽고 이벤트 동작(LED(赤) ▷ OFF, LED(綠) ▷ On)
-
-    2.2 불량품 결정 (PC12 INTERRUPT)
-        2.2.1 JETSON PIN33 GPIO HIGH - > (PC12 INTERRUPT)
-        2.2.2 STATE_FAIL 진입, Queue에 이벤트 push
-        2.2.3 Queue 읽고 이벤트 동작(LED(綠) ▷ OFF, LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On)
-
-3. 대기 상태 복귀(STATE_IDLE) 스탭모터 ▷ One cycle
+Jetson GPIO
+    ↓
+EXTI ISR
+    ↓
+PASS 또는 FAIL 이벤트를 Queue에 저장
+    ↓
+main 반복문{
+    초기화(최초)
+      ↓
+초기 상태 진입(최초)
+      ↓
+   무한 반복
+Queue에 이벤트가 있으면 상태머신에 전달
+없으면 다음 이벤트 대기      
+}      
+    ↓
+Queue에서 이벤트를 꺼냄
+    ↓
+현재 상태 함수에 전달
+    ↓
+상태 전이 및 장치 함수 호출
 ````
 
 # 3. 스탭모터
 
 | 항목 | 결정 내용 |
 | --- | --- |
-| 모터/드라이버 | 28BYJ-48 + ULN2003 |
-| 핀 | PC7/PB6/PA7/PA6 (PORTA nibble 분할 제어) |
-| 구동 방식 | Full Drive (2상 여자, 4-step 시퀀스) |
-| 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 → 3ms |
+| 모터/드라이버 | bq stepping motor 42shdb4036z-24b + TB6600 microstep driver |
+| 핀 | PA6(PUL)/PA7(DIR) (동작 / 방향) |
+| 구동 방식 | Full Drive (2상 Bipolar Stepper) |
+| 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 → 1ms |
 | 호출 | 1회 호출시 특정 스탭 만큼 회전 |
 
-    ```
-    // IN1,IN2,IN3,IN4 순서 (PA0-PA3 / PA4-PA7 nibble)
-    const uint8_t FULL_DRIVE_SEQ[4] = {
-        0b1100,
-        0b0110,
-        0b0011,
-        0b1001
-    };
-    ```
+~~| 모터/드라이버 | 28BYJ-48 + ULN2003 |~~
+~~| 핀 | PC7/PB6/PA7/PA6 (PORTA nibble 분할 제어) |~~
+~~| 구동 방식 | Full Drive (2상 여자, 4-step 시퀀스) |~~
+~~| 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 → 3ms |~~
+~~| 호출 | 1회 호출시 특정 스탭 만큼 회전 |~~
 
 # 4. 서보 모터
 
@@ -140,7 +171,7 @@ EVENT_FAIL()
 # 6. 검증
 
 1. 젠슨과 아트메가 그라운드 연결 필수임
-2. 젠슨 gpio 정상 동작 11번 12번 인터럽트까지 확인.
+2. 젠슨 gpio 정상 동작 10번, 11번, 12번 인터럽트까지 확인.
 
 ## JETSON ORIN NANO gpio pin setting
 
