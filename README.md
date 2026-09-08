@@ -83,11 +83,11 @@ EVENT_FAIL()
                      ↓
                  STATE_RUN
                      │
-                     │ PC12(STOP)
+                     │ PC10(STOP)
                      ▼
                STATE_INSPECT
                   /       \
-         PC11(완료)       PC10(FAIL)
+         PC11(완료)       PC12(FAIL)
               │               │
               │               ▼
               │           STATE_FAIL
@@ -135,9 +135,9 @@ Step_Motor_Run()
 
 ② PCB가 ROI 80% 진입
 
-Jetson P33
-→ STM32 PC12
-→ EXTI12
+Jetson P29
+→ STM32 PC10
+→ EXTI10
 → STOP 이벤트
 
 ③ STATE_INSPECT
@@ -163,7 +163,7 @@ Step_Motor_Run()
    ↓
 PCB 진입
 
-② P33 → PC12
+② P29 → PC10
 
 STOP
 ↓
@@ -175,7 +175,7 @@ STATE_INSPECT
 
 ④ FAIL 확정
 
-P29 → PC10
+P33 → PC12
 ↓
 FAIL 이벤트
 ↓
