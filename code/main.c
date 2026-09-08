@@ -51,7 +51,17 @@ void Main(void){
 	Sys_Init(115200);
 	volatile unsigned int i;
 	for(;;){
-		// 계속해서 state를 체크하고 있다가 상태가 변화하면 이벤트를 실행시키고 이벤트에서 state를 원상태로 복구시킨다
+/*
+RUNNING
+   │
+   │ PC12
+   ▼
+INSPECTING
+   │
+   ├── PC10 → FAIL 처리
+   │
+   └── PC11 → 다시 RUNNING
+*/
 
 	}
 }
