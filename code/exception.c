@@ -34,5 +34,15 @@ void EXTI15_10_IRQHandler(void)
 
 		EXTI->PR = (1 << 12);   // EXTI12 Pending clear
     }
+
+    if (EXTI->PR & (1 << 11))
+    {
+		    printf("EXTI11\n");
+
+        // PC12 이벤트 처리
+		// state_fail 상태가 되게 한다??
+
+		EXTI->PR = (1 << 11);   // EXTI11 Pending clear
+    }
 }
 
