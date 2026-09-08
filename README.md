@@ -48,8 +48,8 @@ typedef enum {
           FAIL 처리 중
 } SystemState;
 
-EVENT_IDLE()
-EVENT_NORMAL()
+EVENT_STOP()
+EVENT_PASS()
 EVENT_FAIL()
 ```
 
@@ -65,16 +65,13 @@ EVENT_FAIL()
 # 2.2 상태 규칙
 | 상태 | 진입 | 허용 입력 | 전이 |
 | --- | --- | --- | --- |
-| STATE_IDLE | 최초 부팅, 이벤트가 없을 경우 | pc10, pc12 | PC10(양품) ▷ STATE_NORMAL PC12(불량품) ▷ STATE_FAIL |
-| STATE_NORMAL | PC10 INTERRUPT  | `None` | STATE_IDLE |
-| STATE_FAIL | PC12 INTERRUPT  | `None` | STATE_IDLE |
 
 # 2.3 이벤트 동작 규칙
 | 이벤트 | 동작 |
 | --- | --- | 
-| EVENT_IDLE | 스탭모터 ▷ One cycle |
-| EVENT_NORMAL | LED(綠) ▷ On |
-| EVENT_FAIL | LED(赤) ▷ On, 서보모터 ▷ One cycle, 부저 ▷ On |
+| EVENT_STOP | 컨베이어 벨트 정지 |
+| EVENT_PASS | 컨베이어 벨트 시작 |
+| EVENT_FAIL | 서보모터 동작 |
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
 # 2.4  구조
@@ -150,7 +147,7 @@ Step_Motor_Stop()
 
 Jetson P31
 → STM32 PC11
-→ RESUME 이벤트
+→ PASS 이벤트
 
 ⑥ STATE_RUN
 
