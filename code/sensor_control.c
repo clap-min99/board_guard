@@ -12,6 +12,6 @@ void Sensor_Control_Init(void)
 	LED_Init();
 	Step_Motor_Init();
 	Alarm_Init();
-	jetson_init();
 	Servo_Init();
+	jetson_init(); // 나중에 맨마지막에 호출
 }

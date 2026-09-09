@@ -2,6 +2,7 @@
 
 #include "device_driver.h"
 #include "timer.h"
+#include "event_queue.h"
 #include <stdio.h>
 
 static void Sys_Init(int baud)
@@ -12,28 +13,27 @@ static void Sys_Init(int baud)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	Sensor_Control_Init();
 }
+SystemEvent event;
 
 void Main(void){
     volatile unsigned int i;
 	int test = 1;
+	EventQueue_Init();
     Sys_Init(115200);
     printf("\n=== individual device test ===\n");
 	for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-	Step_Motor_Run();
+	//Step_Motor_Run();
 	//alarm_control(1);
+	EventQueue_Push(EVT_STOP);
+	EventQueue_Push(EVT_PASS);
+	EventQueue_Push(EVT_FAIL);
+
+	while (EventQueue_Pop(&event))
+	{
+		printf("event = %d\n", event);
+	}
+
     for (;;){
-		for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-		//led_control(test);
-		//step_motor_control(100);
-		
-		if(test == 1){
-			test = 0;
-			//Servo_Push();
-			
-		}else{ 
-			test = 1;
-			//Servo_Home();
-		}
     }
 }
 

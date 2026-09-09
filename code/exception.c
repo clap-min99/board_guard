@@ -1,6 +1,7 @@
 #include "device_driver.h"
 #include <stdio.h>
 #include "step_motor.h"
+#include "event_queue.h"
 
 
 void _Invalid_ISR(void)
@@ -13,7 +14,33 @@ void _Invalid_ISR(void)
 
 void EXTI15_10_IRQHandler(void)
 {
-	static int servo_state = 0;
+    uint32_t pending;
+
+    pending = EXTI->PR
+            & ((1U << 10) | (1U << 11) | (1U << 12));
+
+    /* 확인한 Pending을 먼저 해제 */
+    EXTI->PR = pending;
+
+    if (pending & (1U << 10))
+    {
+        (void)EventQueue_Push(EVT_STOP);
+    }
+
+    if (pending & (1U << 11))
+    {
+        (void)EventQueue_Push(EVT_PASS);
+    }
+
+    if (pending & (1U << 12))
+    {
+        (void)EventQueue_Push(EVT_FAIL);
+    }
+}
+
+/*
+void EXTI15_10_IRQHandler(void)
+{
 	//printf("%ld\n", EXTI->PR);
 	//printf("%ld, %ld\n", GPIOC-IDR);
 
@@ -23,8 +50,9 @@ void EXTI15_10_IRQHandler(void)
 		//printf("EXTI10\n");
 
         // PC10 이벤트 처리
-		// 멈춰!
-		Step_Motor_Stop();
+		// 멈춰! Step_Motor_Stop();
+		EventQueue_Push(EVT_STOP);
+
         EXTI->PR = (1 << 10);   // EXTI10 Pending clear
     }
 
@@ -33,8 +61,8 @@ void EXTI15_10_IRQHandler(void)
 		//printf("EXTI11\n");
 
         // PC12 이벤트 처리
-		// 다시 굴러가
-		Step_Motor_Run();
+		// 다시 굴러가 Step_Motor_Run();
+		EventQueue_Push(EVT_PASS);
 
 		EXTI->PR = (1 << 11);   // EXTI11 Pending clear
     }
@@ -44,16 +72,11 @@ void EXTI15_10_IRQHandler(void)
 		//printf("EXTI12\n");
 
         // PC12 이벤트 처리
-		// 서보 움직여
-		if(servo_state == 1){
-			Servo_Push();
-			servo_state = 0;
-		}else{
-			Servo_Home();
-			servo_state = 1;
-		}
+		// 서보 움직여 Servo_Push(); Servo_Home();
+		EventQueue_Push(EVT_FAIL);
+
 		EXTI->PR = (1 << 12);   // EXTI12 Pending clear
     }
 
 }
-
+*/
