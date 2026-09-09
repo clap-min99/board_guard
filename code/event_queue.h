@@ -6,7 +6,9 @@ typedef enum {
     EVT_PASS,
     EVT_FAIL,
     EVT_REJECT_DONE,
-    EVT_DISPLAY_TIMEOUT
+    EVT_DISPLAY_TIMEOUT,
+    EVT_MOTOR_DONE,
+    EVT_SERVO_DONE
 } SystemEvent;
 
 void EventQueue_Init(void);

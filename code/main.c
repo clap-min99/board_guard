@@ -3,6 +3,7 @@
 #include "device_driver.h"
 #include "timer.h"
 #include "event_queue.h"
+#include "system_control.c"
 #include <stdio.h>
 
 static void Sys_Init(int baud)
@@ -11,24 +12,26 @@ static void Sys_Init(int baud)
 	Clock_Init();
 	Uart2_Init(baud);
 	setvbuf(stdout, NULL, _IONBF, 0);
+	EventQueue_Init();
 	Sensor_Control_Init();
+	Step_Motor_Run();
+	_state_machine_init();
 }
+
 SystemEvent event;
+//alarm_control(1);
 
 void Main(void){
     volatile unsigned int i;
-	int test = 1;
-	EventQueue_Init();
     Sys_Init(115200);
-    printf("\n=== individual device test ===\n");
+    printf("\n=== device test ===\n");
 	for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-	//alarm_control(1);
 	
-	Step_Motor_Run();
-
     for (;;){
 		if (EventQueue_Pop(&event)){
-        printf("received event = %d\n", event);
+        	printf("received event = %d\n", event);
+			// 이벤트가 있으면 상태머신에 전달
+			main_state_muchine(event);
     	}
     }
 }

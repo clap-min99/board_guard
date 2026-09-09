@@ -20,7 +20,7 @@ int EventQueue_Push(SystemEvent event){
 인터럽트 상태 저장
 인터럽트 잠시 금지
 
-count가 8이면
+count가 EVENT_QUEUE_SIZE이면
     인터럽트 상태 복원
     실패 반환
 

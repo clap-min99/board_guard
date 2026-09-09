@@ -2,7 +2,7 @@
 #include "timer.h"
 #include "servo.h"
 #include <stdio.h>
-
+#include "event_queue.h"
 
 #define SERVO_PERIOD_US        20000
 #define SERVO_HOME_PULSE_US     2000
@@ -61,7 +61,7 @@ void Timer2_CC2_Callback(void)
 			/* 남은시간?*/
 			Timer2_Arm_CC2(servo_pulse);
 		}else{
-	
+			(void)EventQueue_Push(EVT_SERVO_DONE);
 		}
 	}
 }

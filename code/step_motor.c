@@ -1,5 +1,6 @@
 #include "device_driver.h"
 #include "step_motor.h"
+#include "event_queue.h"
 
 #define STEP_PIN    6   /* PA6 -> PUL+ */
 #define DIR_PIN     7   /* PA7 -> DIR+ */
@@ -7,6 +8,10 @@
 
 
 static volatile unsigned int pulse_state;
+
+static volatile unsigned int step_count;
+static volatile unsigned int target_step;
+static volatile unsigned int step_run;
 
 /* STEP */
 static void Step_High(void){
@@ -19,11 +24,11 @@ static void Step_Low(void){
 
 /* 방향 */
 static void Dir_Forward(void){
-    GPIOA->BSRR = (1U << DIR_PIN);
+    GPIOA->BSRR = (1U << (DIR_PIN + 16));
 }
 
 static void Dir_Reverse(void){
-    GPIOA->BSRR = (1U << (DIR_PIN + 16));
+    GPIOA->BSRR = (1U << (DIR_PIN));
 }
 
 void Step_Motor_Init(void){
@@ -63,12 +68,29 @@ void Step_Motor_Init(void){
     pulse_state = 0;
 }
 
+/* 일정 step만 회전*/
+void Step_Motor_Run_Steps(int n){
+    Dir_Forward();
+    Step_Low();
+    pulse_state = 0;
+
+    step_count = 0;
+    target_step = n;
+    step_run = 1;
+
+    TIM4->CNT = 0;
+    TIM4->SR = 0;
+
+    Macro_Set_Bit(TIM4->CR1, 0);
+}
+
 
 /* 정방향으로 계속 회전 */
 void Step_Motor_Run(void){
     Dir_Forward();
     Step_Low();
     pulse_state = 0;
+    step_run = 0;
 
     TIM4->CNT = 0;
     TIM4->SR = 0;
@@ -81,6 +103,7 @@ void Step_Motor_Run_Reverse(void){
     Dir_Reverse();
     Step_Low();
     pulse_state = 0;
+    step_run = 0;
 
     TIM4->CNT = 0;
     TIM4->SR = 0;
@@ -109,6 +132,14 @@ void TIM4_IRQHandler(void){
     if (pulse_state == 0){
         Step_High();
         pulse_state = 1;
+        if(step_run == 1){
+            step_count++;
+            if(step_count > target_step){
+                Step_Motor_Stop();
+                step_run = 0;
+                (void)EventQueue_Push(EVT_MOTOR_DONE);
+            }
+        }
     }
     else{
         Step_Low();
