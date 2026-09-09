@@ -66,8 +66,7 @@ void Step_Motor_Init(void){
 
 /* 정방향으로 계속 회전 */
 void Step_Motor_Run(void){
-    Dir_Reverse();
-    //Dir_Forward();
+    Dir_Forward();
     Step_Low();
     pulse_state = 0;
 

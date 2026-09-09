@@ -1,7 +1,7 @@
 #include "event_queue.h"
 #include "stm32f4xx.h"
 
-#define EVENT_QUEUE_SIZE  8U
+#define EVENT_QUEUE_SIZE  20U
 
 static SystemEvent buffer[EVENT_QUEUE_SIZE];
 
