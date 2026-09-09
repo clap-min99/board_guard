@@ -75,8 +75,8 @@
                         <h2>현재 PCB 이상 점수</h2>
                         <canvas id="defectChart" class="chart-canvas"></canvas>
                         <div class="legend">
-                            <span><i style="background:#ef5964; margin:10px"></i>이상 점수</span>
-                            <span><i style="background:#28a590; margin:10px"></i>정상 범위</span>
+                            <span class="legend-item"><i class="legend-anomaly" aria-hidden="true"></i>이상 점수 <strong id="anomaly-score-value">—</strong></span>
+                            <span class="legend-item"><i class="legend-normal" aria-hidden="true"></i>정상 기준 <strong id="normal-threshold-value">—</strong></span>
                         </div>
                     </article>
 

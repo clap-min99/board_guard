@@ -372,6 +372,7 @@ def inspection():
         "recent_inspections": get_recent_inspections(),
         "model_name": MODEL_NAME,
         "device_name": DEVICE_NAME,
+        "threshold": BACK_THRESHOLD if result.get("active_side") == "back" else FRONT_THRESHOLD,
     })
 
     if camera_status["camera_state"] == "offline":

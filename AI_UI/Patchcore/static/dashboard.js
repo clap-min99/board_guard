@@ -266,7 +266,12 @@ switch (data.state) {
 }
 
 function updateAnomalyChart(data) {
-    const detail = Number(data.details);
+    const detail = data.details == null || data.details === '' ? NaN : Number(data.details);
+    const threshold = data.threshold == null || data.threshold === '' ? NaN : Number(data.threshold);
+    document.getElementById('anomaly-score-value').textContent = Number.isFinite(detail)
+        ? detail.toFixed(3) : '—';
+    document.getElementById('normal-threshold-value').textContent = Number.isFinite(threshold)
+        ? `< ${threshold.toFixed(2)}` : '—';
     const anomalyPercent = Number.isFinite(detail)
         ? Math.max(0, Math.min(100, detail * 100))
         : 0;
