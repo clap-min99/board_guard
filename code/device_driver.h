@@ -81,6 +81,6 @@ extern void SPI1_SC16IS752_Write_GPIO(unsigned int data);
 
 #include "sensor_control.h"
 
-extern void Servo_Init(void);
 extern void Servo_Push(void);
 extern void Servo_Home(void);
+extern void Step_Motor_Run(void);

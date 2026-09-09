@@ -3,7 +3,7 @@
 
 #define STEP_PIN    6   /* PA6 -> PUL+ */
 #define DIR_PIN     7   /* PA7 -> DIR+ */
-#define MOTOR_SPEED 5000 /* LOW -> HIGH SPEED */
+#define MOTOR_SPEED 800 /* LOW -> HIGH SPEED */
 
 
 static volatile unsigned int pulse_state;
@@ -75,6 +75,19 @@ void Step_Motor_Run(void){
 
     Macro_Set_Bit(TIM4->CR1, 0);
 }
+
+/* 역방향으로 계속 회전 */
+void Step_Motor_Run_Reverse(void){
+    Dir_Reverse();
+    Step_Low();
+    pulse_state = 0;
+
+    TIM4->CNT = 0;
+    TIM4->SR = 0;
+
+    Macro_Set_Bit(TIM4->CR1, 0);
+}
+
 
 
 /* 정지 */

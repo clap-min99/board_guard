@@ -1,5 +1,5 @@
-#ifndef LED_H
-#define LED_H
+#ifndef SERVO_H
+#define SERVO_H
 
 void Servo_Init(void);
 void Servo_Push(void);

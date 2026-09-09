@@ -5,9 +5,9 @@
 
 
 #define SERVO_PERIOD_US        20000
-#define SERVO_HOME_PULSE_US     1000
-#define SERVO_PUSH_PULSE_US     2000
-#define SERVO_REPEAT              20
+#define SERVO_HOME_PULSE_US     2000
+#define SERVO_PUSH_PULSE_US     1000
+#define SERVO_REPEAT              10
 
 #define servo_high 1
 #define servo_low 0

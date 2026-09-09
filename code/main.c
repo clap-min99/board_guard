@@ -19,6 +19,7 @@ void Main(void){
     Sys_Init(115200);
     printf("\n=== individual device test ===\n");
 	for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
+	Step_Motor_Run();
 	//alarm_control(1);
     for (;;){
 		for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
@@ -27,10 +28,11 @@ void Main(void){
 		
 		if(test == 1){
 			test = 0;
-			Servo_Push();
+			//Servo_Push();
+			
 		}else{ 
 			test = 1;
-			Servo_Home();
+			//Servo_Home();
 		}
     }
 }

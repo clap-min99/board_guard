@@ -13,5 +13,5 @@ void Sensor_Control_Init(void)
 	Step_Motor_Init();
 	Alarm_Init();
 	jetson_init();
-	//Servo_Init();
+	Servo_Init();
 }
