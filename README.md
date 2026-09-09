@@ -48,9 +48,11 @@ typedef enum {
           FAIL 처리 중
 } SystemState;
 
-EVENT_STOP()
-EVENT_PASS()
-EVENT_FAIL()
+MOTOR_DONE()
+JETSON_PASS()
+JETSON_FAIL()
+DISPLAY_TIMEOUT()
+REJECT_DONE()
 ```
 
 # 2.1 부팅 동작
@@ -63,15 +65,12 @@ EVENT_FAIL()
 ```
 
 # 2.2 상태 규칙
-| 상태 | 진입 | 허용 입력 | 전이 |
-| --- | --- | --- | --- |
-
-# 2.3 이벤트 동작 규칙
-| 이벤트 | 동작 |
-| --- | --- | 
-| EVENT_STOP | 컨베이어 벨트 정지 |
-| EVENT_PASS | 컨베이어 벨트 시작 |
-| EVENT_FAIL | 서보모터 동작 |
+|상태|진입할 때 수행하는 동작|기다리는 이벤트|
+|---|---|---|
+|MOVING|스테핑모터 이동 시작|MOTOR_DONE|
+|WAIT_RESULT|LED·부저 OFF, Jetson 판정 대기|JETSON_PASS/FAIL|
+|PASS_SHOW|초록 LED ON, 5초 타이머 시작|DISPLAY_TIMEOUT|
+|FAIL_REJECT|빨간 LED·부저 ON, 서보 배출 시작|REJECT_DONE|
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
 # 2.4  구조
