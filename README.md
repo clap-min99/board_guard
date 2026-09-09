@@ -1,5 +1,3 @@
-
-
 # 설계
 
 # 0. 범위 / 전제
@@ -31,10 +29,10 @@ JETSON ORIN NANO Developer Kit           M4 Nuclear64
 | 부저 | PB4 | TIM3_CH1_PWM | AF2 | 완료 |
 | ~~스탭모터 4핀~~ | PC7/PB6/PA7/PA6 | GPIO Output | 불필요 | 미사용 |
 | 스탭모터 2핀 | PA6(PUL)/PA7(DIR) | GPIO Output | 불필요 | 완료 |
-| 서보모터 | PB5 |GPIO Output / TIM2 CC2 timing | AF2 | 미완료 |
+| 서보모터 | PB5 |GPIO Output/ TIM2 CC2 compare interrupt timing| 불필요 | 미완료 |
 | jetson(STOP) | P29 - PC10 | GPIO Input | 불필요 | 인터럽트 완료 |
-| jetson(PASS->MOVE) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
-| jetson(PAIL->MOVE) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(PASS) | P31 - PC11 | GPIO Input | 불필요 | 인터럽트 완료 |
+| jetson(FAIL) | P33 - PC12 | GPIO Input | 불필요 | 인터럽트 완료 |
 
 # 2. 상태 및 이벤트
 
@@ -48,11 +46,12 @@ typedef enum {
           FAIL 처리 중
 } SystemState;
 
-MOTOR_DONE()
-JETSON_PASS()
-JETSON_FAIL()
-DISPLAY_TIMEOUT()
-REJECT_DONE()
+EVT_STOP
+EVT_PASS
+EVT_FAIL
+EVT_REJECT_DONE
+EVT_DISPLAY_TIMEOUT
+
 ```
 
 # 2.1 부팅 동작
@@ -65,140 +64,162 @@ REJECT_DONE()
 ```
 
 # 2.2 상태 규칙
-|상태|진입할 때 수행하는 동작|기다리는 이벤트|
+|상태	|의미|
+|---|---|
+|STATE_RUN	|컨베이어가 계속 움직이는 상태|
+|STATE_INSPECT	|컨베이어를 멈추고 Jetson 결과를 기다리는 상태|
+|STATE_REJECT	|불량 PCB를 서보로 배출하는 상태|
+
+# 2.2 상태별 동작 규칙
+|현재 상태	|진입 동작	|수신 이벤트	|처리와 다음 상태|
+|---|---|---|---|
+|STATE_RUN	|Step_Motor_Run()	|EVT_STOP	|모터 정지 후 STATE_INSPECT|
+|STATE_INSPECT	|Step_Motor_Stop()	|EVT_PASS	|초록 LED ON, 표시 타이머 시작, STATE_RUN|
+|STATE_INSPECT	|Step_Motor_Stop()	|EVT_FAIL	|STATE_REJECT|
+|STATE_REJECT	|빨간 LED·부저 ON, 서보 배출 시작	|EVT_REJECT_DONE	|부저 OFF, STATE_RUN|
+|모든 관련 상태	|없음	|EVT_DISPLAY_TIMEOUT	|LED OFF, 상태는 유지|
+
+# 2.3 이벤트 규칙
+|이벤트|발생 위치|의미|
 |---|---|---|
-|MOVING|스테핑모터 이동 시작|MOTOR_DONE|
-|WAIT_RESULT|LED·부저 OFF, Jetson 판정 대기|JETSON_PASS/FAIL|
-|PASS_SHOW|초록 LED ON, 5초 타이머 시작|DISPLAY_TIMEOUT|
-|FAIL_REJECT|빨간 LED·부저 ON, 서보 배출 시작|REJECT_DONE|
+|EVT_STOP	|EXTI10 ISR	|PCB가 검사 위치에 도착했으므로 컨베이어 정지|
+|EVT_PASS	|EXTI11 ISR	|Jetson이 양품으로 판정|
+|EVT_FAIL	|EXTI12 ISR	|Jetson이 불량품으로 판정|
+|EVT_REJECT_DONE	|서보 제어 완료 시	|PUSH와 HOME 동작 완료|
+|EVT_DISPLAY_TIMEOUT	|타이머 만료 시	|결과 LED 5초 표시 종료|
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
+
 # 2.4  구조
 ```
-                  전원 ON
+                  JETSON GPIO
                      ↓
-                 STATE_RUN
+                 EXTI ISR      Timer*servo 완료
+                     │                │
+                     │    ┬───────────┘
+                     ▼    ▼
+               Event Queue
                      │
-                     │ PC10(STOP)
                      ▼
-               STATE_INSPECT
-                  /       \
-         PC11(완료)       PC12(FAIL)
-              │               │
-              │               ▼
-              │           STATE_FAIL
-              │               │
-              │           Servo 처리
-              │               │
-              │          PC11(완료)
-              │               │
-              └───────┬───────┘
-                      ▼
-                  STATE_RUN
+             main event loop
+                     │
+                     ▼
+            system state machine
+                     │
+                     ▼
+            device control API
 ```
-# 2.5 흐름
-
+# 2.4.1 구조 구성요소간 각 역할
 ```
-Jetson GPIO
-    ↓
 EXTI ISR
-    ↓
-PASS 또는 FAIL 이벤트를 Queue에 저장
-    ↓
-main 반복문{
-    초기화(최초)
-      ↓
-초기 상태 진입(최초)
-      ↓
-   무한 반복
-Queue에 이벤트가 있으면 상태머신에 전달
-없으면 다음 이벤트 대기      
-}      
-    ↓
-Queue에서 이벤트를 꺼냄
-    ↓
+Pending bit 확인
+해당 Pending bit 제거
+EVT_STOP, EVT_PASS, EVT_FAIL 중 하나를 Queue에 저장
+즉시 복귀
+
+EXTI ISR은 상태를 직접 바꾸지 않습니다.
+
+Event Queue
+ISR이 이벤트를 넣는 장소
+고정 크기 배열 기반
+동적 메모리 사용 없음
+ISR이 생산자, main이 소비자
+main Event Loop
+
+초기화와 상태 초기 진입은 한 번만 수행합니다.
+
+이후 무한 반복에서는:
+
+Queue에서 이벤트 확인
+이벤트가 있으면 꺼냄
 현재 상태 함수에 전달
-    ↓
-상태 전이 및 장치 함수 호출
-````
-# 2.5.1 PASS 흐름
+상태 함수가 장치 API 호출 또는 상태 전이
+```
+
+# 각 실제시간 흐름 예시
+
+## PASS 흐름
 ```
 ① 부팅
-   ↓
-STATE_RUN
-   ↓
-Step_Motor_Run()
+   → 주변장치 초기화
+   → STATE_RUN 진입
+   → Step_Motor_Run()
 
-② PCB가 ROI 80% 진입
+② PCB가 ROI 검사 위치에 도착
 
-Jetson P29
-→ STM32 PC10
-→ EXTI10
-→ STOP 이벤트
+③ Jetson BOARD 29 HIGH
+   → STM32 PC10 / EXTI10
+   → EVT_STOP을 Queue에 저장
 
-③ STATE_INSPECT
+④ main이 EVT_STOP 처리
+   → Step_Motor_Stop()
+   → STATE_INSPECT 전이
 
-Step_Motor_Stop()
+⑤ Jetson 60프레임 검사
 
-④ Jetson 60 frame 검사
+⑥ PASS 확정
+   → Jetson BOARD 31 HIGH
+   → STM32 PC11 / EXTI11
+   → EVT_PASS를 Queue에 저장
 
-⑤ PASS
+⑦ STATE_INSPECT에서 EVT_PASS 처리
+   → 빨간 LED OFF
+   → 초록 LED ON
+   → 5초 표시 타이머 시작
+   → STATE_RUN 전이
+   → Step_Motor_Run()
 
-Jetson P31
-→ STM32 PC11
-→ PASS 이벤트
-
-⑥ STATE_RUN
-
-Step_Motor_Run()
+⑧ 5초 후 EVT_DISPLAY_TIMEOUT
+   → 초록 LED OFF
 ```
-
-# 2.5.2 FAIL 흐름
+## FAIL 흐름
 ```
-① STATE_RUN
-   ↓
-PCB 진입
+① STATE_RUN에서 PCB 진입
 
-② P29 → PC10
+② Jetson BOARD 29 HIGH
+   → EVT_STOP
+   → STATE_INSPECT
+   → 컨베이어 정지
 
-STOP
-↓
-STATE_INSPECT
-↓
-컨베이어 정지
-
-③ 60 frame 검사
+③ Jetson 60프레임 검사
 
 ④ FAIL 확정
+   → Jetson BOARD 33 HIGH
+   → STM32 PC12 / EXTI12
+   → EVT_FAIL을 Queue에 저장
 
-P33 → PC12
-↓
-FAIL 이벤트
-↓
-STATE_FAIL
+⑤ STATE_INSPECT에서 EVT_FAIL 처리
+   → STATE_REJECT 전이
 
-⑤ 빨간 LED
-   부저
-   Servo PUSH
-   Servo HOME
+⑥ STATE_REJECT 진입
+   → 초록 LED OFF
+   → 빨간 LED ON
+   → 부저 ON
+   → Servo PUSH 시작
 
-⑥ Jetson P31 → PC11
+⑦ Servo PUSH 완료
+   → Servo HOME 시작
 
-RESUME
-↓
-STATE_RUN
-↓
-컨베이어 재가동
+⑧ Servo HOME 완료
+   → EVT_REJECT_DONE을 Queue에 저장
+
+⑨ STATE_REJECT에서 EVT_REJECT_DONE 처리
+   → 부저 OFF
+   → STATE_RUN 전이
+   → Step_Motor_Run()
+
+⑩ 5초 후 EVT_DISPLAY_TIMEOUT
+   → 빨간 LED OFF
 ```
+
 # 3. 스탭모터
 
 | 항목 | 결정 내용 |
 | --- | --- |
 | 모터/드라이버 | bq stepping motor 42shdb4036z-24b + TB6600 microstep driver |
 | 핀 | PA6(PUL)/PA7(DIR) (동작 / 방향) |
-| 구동 방식 | Full Drive (2상 Bipolar Stepper) |
-| 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 → 1ms |
-| 호출 | 1회 호출시 특정 스탭 만큼 회전 |
+| 구동 방식 | Full Drive (TB6600 PUL/DIR 인터페이스, TIM4 기반 STEP 펄스 생성) |
+| 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 |
 
 ~~| 모터/드라이버 | 28BYJ-48 + ULN2003 |~~
 ~~| 핀 | PC7/PB6/PA7/PA6 (PORTA nibble 분할 제어) |~~
@@ -211,8 +232,8 @@ STATE_RUN
 | 항목 | 결정 내용 |
 | --- | --- |
 | 모델 | MG90S |
-| 핀/PWM | PB5, TIM3_CH2_PWM |
-| 호출 | 1회 호출시 특정 각도만큼 회전 후 복귀 |
+| 핀/PWM | PB5, GPIO(TIM2 CC2 비교 인터럽트가 다음 HIGH/LOW 전환 시점을 예약) |
+| 호출 | 1회 호출시 특정 각도만큼 회전 |
 
 # 5. LED
 
@@ -233,7 +254,7 @@ STATE_RUN
 
 # 6. 검증
 
-1. 젠슨과 아트메가 그라운드 연결 필수임
+1. 젠슨과 아트메가 GND → Jetson과 STM32 GND
 2. 젠슨 gpio 정상 동작 10번, 11번, 12번 인터럽트까지 확인.
 
 ## JETSON ORIN NANO gpio pin setting
