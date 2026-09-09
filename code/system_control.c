@@ -1,6 +1,6 @@
 #include "system_control.h"
 #include "event_queue.h"
-
+#include "device_driver.h"
 
 #define PCB_GET_OUT 1000
 /*
@@ -28,7 +28,7 @@ void main_state_machine(SystemEvent event){
     switch(_state){
         case STATE_RUN:
             if(event == EVT_STOP){
-                Step_Motor_stop();
+                Step_Motor_Stop();
                 _state = STATE_INSPECT;
             }
             break;
@@ -38,7 +38,7 @@ void main_state_machine(SystemEvent event){
             switch(event){
                 case EVT_PASS:
                     // 성공 시 다음꺼 확인
-                    Step_Motor_RUN();
+                    Step_Motor_Run();
                     LED_RED_Off();
                     LED_GREEN_ON();
                     _state = STATE_RUN;
@@ -61,7 +61,7 @@ void main_state_machine(SystemEvent event){
         case STATE_REJECT:
             if (event == EVT_SERVO_DONE){
                 LED_RED_Off();
-                Step_Motor_RUN();
+                Step_Motor_Run();
                 _state = STATE_RUN;
             }
             break;

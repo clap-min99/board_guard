@@ -134,7 +134,7 @@ void TIM4_IRQHandler(void){
         pulse_state = 1;
         if(step_run == 1){
             step_count++;
-            if(step_count > target_step){
+            if(step_count >= target_step){
                 Step_Motor_Stop();
                 step_run = 0;
                 (void)EventQueue_Push(EVT_MOTOR_DONE);

@@ -1,6 +1,8 @@
 #ifndef SYSTEM_CONTROL_H
 #define SYSTEM_CONTROL_H
 
+#include "event_queue.h"
+
 typedef enum{
     STATE_RUN,
     STATE_INSPECT,

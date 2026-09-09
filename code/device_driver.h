@@ -84,3 +84,5 @@ extern void SPI1_SC16IS752_Write_GPIO(unsigned int data);
 extern void Servo_Push(void);
 extern void Servo_Home(void);
 extern void Step_Motor_Run(void);
+extern void Step_Motor_Run_Steps(int n);
+extern void Step_Motor_Stop(void);

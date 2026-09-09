@@ -3,7 +3,7 @@
 #include "device_driver.h"
 #include "timer.h"
 #include "event_queue.h"
-#include "system_control.c"
+#include "system_control.h"
 #include <stdio.h>
 
 static void Sys_Init(int baud)
@@ -31,7 +31,7 @@ void Main(void){
 		if (EventQueue_Pop(&event)){
         	printf("received event = %d\n", event);
 			// 이벤트가 있으면 상태머신에 전달
-			main_state_muchine(event);
+			main_state_machine(event);
     	}
     }
 }
