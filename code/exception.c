@@ -12,6 +12,7 @@ void _Invalid_ISR(void)
 	for(;;);
 }
 
+static int temp = 0;
 void EXTI15_10_IRQHandler(void)
 {
     uint32_t pending;
@@ -25,16 +26,26 @@ void EXTI15_10_IRQHandler(void)
     if (pending & (1U << 10))
     {
         (void)EventQueue_Push(EVT_STOP);
+		Step_Motor_Stop();
     }
 
     if (pending & (1U << 11))
     {
         (void)EventQueue_Push(EVT_PASS);
+		Step_Motor_Run();
     }
 
     if (pending & (1U << 12))
     {
         (void)EventQueue_Push(EVT_FAIL);
+		if(temp == 0){
+			Servo_Push(); 
+			temp = 1;
+		}else{
+			Servo_Home();
+			temp = 0;
+		}
+		
     }
 }
 

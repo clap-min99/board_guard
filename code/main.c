@@ -22,11 +22,13 @@ void Main(void){
     Sys_Init(115200);
     printf("\n=== individual device test ===\n");
 	for (i = 0; i < SYSCLK/10U; i++){ __NOP(); }
-	//Step_Motor_Run();
+	
 	//alarm_control(1);
 	EventQueue_Push(EVT_STOP);
 	EventQueue_Push(EVT_PASS);
 	EventQueue_Push(EVT_FAIL);
+
+	Step_Motor_Run();
 
 	while (EventQueue_Pop(&event))
 	{
@@ -34,6 +36,9 @@ void Main(void){
 	}
 
     for (;;){
+		if (EventQueue_Pop(&event)){
+        printf("received event = %d\n", event);
+    	}
     }
 }
 
