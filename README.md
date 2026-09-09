@@ -2,7 +2,7 @@
 
 # 0. 범위 / 전제
 
-- 기반 : M4 Nuclear64
+- 기반 :STM32F411RE Nucleo-64
 - 대상  
       상태머신  
       스탭모터 ( 컨베이어 벨트 묘사 )  
@@ -15,13 +15,13 @@
 
 # 1. 시스템 구성 및 하드웨어 리소스 배정
 ```
-JETSON ORIN NANO Developer Kit           M4 Nuclear64  
+JETSON ORIN NANO Developer Kit          STM32F411RE Nucleo-64 
 ─────────────────                       ─────────────────
 양품 불량품 판단                        상태머신,
                                        모터/LED 실시간 제어
 ```
 
-## M4 Nuclear64 PIN MAP
+## STM32F411RE Nucleo-64 PIN MAP
 | 장치 | 핀 | 설정 | AF 필요여부 | 완료 여부 |
 | --- | --- | --- | --- | --- |
 | LED(綠) | PA4 | GPIO Output | 불필요 | 완료 |
@@ -42,7 +42,7 @@ typedef enum {
           컨베이어 동작 중
       STATE_INSPECT
           컨베이어 정지 + Jetson 검사 중
-      STATE_FAIL
+      STATE_REJECT
           FAIL 처리 중
 } SystemState;
 
@@ -59,27 +59,26 @@ EVT_DISPLAY_TIMEOUT
 ```
 전원 인가  
     → 주변장치 초기화
-    → IDLE 상태 대기
     → 컨베이어 벨트 동작
 ```
 
-# 2.2 상태 규칙
+# 2.3 상태 규칙
 |상태	|의미|
 |---|---|
 |STATE_RUN	|컨베이어가 계속 움직이는 상태|
 |STATE_INSPECT	|컨베이어를 멈추고 Jetson 결과를 기다리는 상태|
 |STATE_REJECT	|불량 PCB를 서보로 배출하는 상태|
 
-# 2.2 상태별 동작 규칙
-|현재 상태	|진입 동작	|수신 이벤트	|처리와 다음 상태|
+# 2.4 상태별 동작 규칙
+|현재 상태	|진입 동작	|이벤트	|처리|
 |---|---|---|---|
-|STATE_RUN	|Step_Motor_Run()	|EVT_STOP	|모터 정지 후 STATE_INSPECT|
-|STATE_INSPECT	|Step_Motor_Stop()	|EVT_PASS	|초록 LED ON, 표시 타이머 시작, STATE_RUN|
-|STATE_INSPECT	|Step_Motor_Stop()	|EVT_FAIL	|STATE_REJECT|
-|STATE_REJECT	|빨간 LED·부저 ON, 서보 배출 시작	|EVT_REJECT_DONE	|부저 OFF, STATE_RUN|
-|모든 관련 상태	|없음	|EVT_DISPLAY_TIMEOUT	|LED OFF, 상태는 유지|
+|STATE_RUN	|Step_Motor_Run()	|EVT_STOP	|STATE_INSPECT 전이|
+|STATE_INSPECT	|Step_Motor_Stop()	|EVT_PASS	|초록 LED·타이머 시작 후 STATE_RUN|
+|STATE_INSPECT	|Step_Motor_Stop()	|EVT_FAIL	|STATE_REJECT 전이|
+|STATE_REJECT	|빨간 LED·부저·서보 시작	|EVT_REJECT_DONE	|부저 OFF 후 STATE_RUN|
+|전체	|없음	|EVT_DISPLAY_TIMEOUT	|LED만 OFF|
 
-# 2.3 이벤트 규칙
+# 2.5 이벤트 규칙
 |이벤트|발생 위치|의미|
 |---|---|---|
 |EVT_STOP	|EXTI10 ISR	|PCB가 검사 위치에 도착했으므로 컨베이어 정지|
@@ -90,7 +89,7 @@ EVT_DISPLAY_TIMEOUT
 
 장치를 직접 조작하지 않고 반드시 장치 함수를 호출하여 조작하게끔 만든다.
 
-# 2.4  구조
+# 2.6  구조
 ```
                   JETSON GPIO
                      ↓
@@ -109,7 +108,7 @@ EVT_DISPLAY_TIMEOUT
                      ▼
             device control API
 ```
-# 2.4.1 구조 구성요소간 각 역할
+# 2.6.1 구조 구성요소간 각 역할
 ```
 EXTI ISR
 Pending bit 확인
@@ -218,7 +217,7 @@ Queue에서 이벤트 확인
 | --- | --- |
 | 모터/드라이버 | bq stepping motor 42shdb4036z-24b + TB6600 microstep driver |
 | 핀 | PA6(PUL)/PA7(DIR) (동작 / 방향) |
-| 구동 방식 | Full Drive (TB6600 PUL/DIR 인터페이스, TIM4 기반 STEP 펄스 생성) |
+| 구동 방식 | TB6600 PUL/DIR 인터페이스, TIM4 기반 STEP 펄스 생성 |
 | 속도 제어 방식 | 스텝 간 딜레이 조절로 속도 제어 |
 
 ~~| 모터/드라이버 | 28BYJ-48 + ULN2003 |~~
@@ -239,22 +238,22 @@ Queue에서 이벤트 확인
 
 | 항목 | 결정 내용 |
 | --- | --- |
-| 赤 | EVENT_FAIL 발생 시 5초간 점등 |
-| 綠 | EVENT_NORMAL 발생 시 5초간 점등 |
+| 赤 | EVT_FAILL 발생 시 5초간 점등 |
+| 綠 | EVT_PASS 발생 시 5초간 점등 |
 | `None` | --- |
 
-# 5. BUZZER
+# 6. BUZZER
 
 | 항목 | 결정 내용 |
 | --- | --- |
-| On | EVENT_FAIL 발생 시 특정알람 |
+| On | EVT_FAIL 발생 시 특정알람 |
 | `None` | --- |
 
 
 
-# 6. 검증
+# 7. 검증
 
-1. 젠슨과 아트메가 GND → Jetson과 STM32 GND
+1. 젠슨과 STM32 GND → Jetson과 STM32 GND
 2. 젠슨 gpio 정상 동작 10번, 11번, 12번 인터럽트까지 확인.
 
 ## JETSON ORIN NANO gpio pin setting
