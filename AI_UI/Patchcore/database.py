@@ -1,5 +1,6 @@
 """SQLite persistence for confirmed PCB inspection results."""
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -45,6 +46,12 @@ def init_database():
             ON inspections(inspected_at DESC)
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(inspections)")}
+        for name in ("causes", "defect_types"):
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE inspections ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'"
+                )
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_inspections_state
@@ -63,6 +70,8 @@ def save_inspection(
     model_name,
     model_version,
     inference_ms,
+    causes=None,
+    defect_types=None,
 ):
     """Persist one confirmed PASS/FAIL result and return its database id."""
     with _connect() as connection:
@@ -76,9 +85,11 @@ def save_inspection(
                 image_path,
                 model_name,
                 model_version,
-                inference_ms
+                inference_ms,
+                causes,
+                defect_types
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 side,
@@ -89,6 +100,8 @@ def save_inspection(
                 model_name,
                 model_version,
                 inference_ms,
+                json.dumps(causes if causes is not None else [], ensure_ascii=False),
+                json.dumps(defect_types if defect_types is not None else [], ensure_ascii=False),
             ),
         )
         return cursor.lastrowid
@@ -123,18 +136,25 @@ def get_inspection_summary():
     }
 
 
+def _inspection_dict(row):
+    result = dict(row)
+    for name in ("causes", "defect_types"):
+        result[name] = json.loads(result.get(name) or "[]")
+    return result
+
+
 def get_recent_inspections():
     """Return the latest ten persisted PASS/FAIL results across both sides."""
     with closing(_connect()) as connection:
         rows = connection.execute(
             """
-            SELECT id, inspected_at, state
+            SELECT id, inspected_at, state, causes, defect_types
             FROM inspections
             ORDER BY inspected_at DESC, id DESC
             LIMIT 10
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_inspection_dict(row) for row in rows]
 
 
 def get_inspection_history(*, state, filter="all", page=1, page_size=20):
@@ -172,7 +192,7 @@ def get_inspection_history(*, state, filter="all", page=1, page_size=20):
         rows = connection.execute(
             f"""
             SELECT id, inspected_at, side, state, score, threshold,
-                   inference_ms, model_name, model_version
+                   inference_ms, model_name, model_version, causes, defect_types
             FROM inspections WHERE {where}
             ORDER BY inspected_at DESC, id DESC LIMIT ? OFFSET ?
             """,
@@ -180,7 +200,7 @@ def get_inspection_history(*, state, filter="all", page=1, page_size=20):
         ).fetchall()
 
     return {
-        "rows": [dict(row) for row in rows],
+        "rows": [_inspection_dict(row) for row in rows],
         "counts": counts,
         "total": total,
         "page": page,

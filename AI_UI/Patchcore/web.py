@@ -8,9 +8,11 @@ from flask import Flask, Response, render_template, jsonify, send_from_directory
 from database import init_database, save_inspection, get_inspection_summary, get_recent_inspections
 from history_api import history_api
 from drawing import draw_inspection_boxes
-from pcb_inspector import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, get_inspection_image_filename, FRONT_ENGINE_PATH,
+from pcb_inspector_ui import (TRTInferenceEngine, load_empty_reference, get_detections, check_loop, reset_inspection_state, get_inspection_image_filename, FRONT_ENGINE_PATH,
 BACK_ENGINE_PATH,EMPTY_REFERENCE_PATH,IMG_SIZE, FRONT_THRESHOLD,BACK_THRESHOLD,
-OUTPUT_DIR_PASS, OUTPUT_DIR_FAIL,)
+OUTPUT_DIR_PASS, OUTPUT_DIR_FAIL, load_regions, FRONT_REGIONS_PATH,
+BACK_REGIONS_PATH, REFERENCE_EMBEDDINGS_PATH,)
+from classify_by_embedding import load_reference
 
 # from database import init_database, save_fail_inspection
 
@@ -142,6 +144,8 @@ latest_result = {
     "details": None,
     "objecting_box": None,
     "bounding_box": None,
+    "causes": [],
+    "defect_types": [],
     "check_number": persisted_summary["total_count"],
     "pass_count": persisted_summary["pass_count"],
     "fail_count": persisted_summary["fail_count"],
@@ -184,7 +188,8 @@ def inspection_worker():
         # CUDA 컨텍스트와 TensorRT 객체는 실제로 추론하는 이 스레드에서
         # 생성하고 계속 같은 스레드에서만 사용한다.
         cuda.init()
-        cuda_context = cuda.Device(0).make_context()
+        cuda_context = cuda.Device(0).retain_primary_context()
+        cuda_context.push()
 
         empty_ref_gray = load_empty_reference(
             EMPTY_REFERENCE_PATH,
@@ -198,6 +203,11 @@ def inspection_worker():
             "front": FRONT_THRESHOLD,
             "back": BACK_THRESHOLD,
         }
+        regions = {
+            "front": load_regions(FRONT_REGIONS_PATH),
+            "back": load_regions(BACK_REGIONS_PATH),
+        }
+        reference, embedding_model = load_reference(REFERENCE_EMBEDDINGS_PATH)
 
         while True:
             inspection_enabled.wait()
@@ -222,13 +232,19 @@ def inspection_worker():
                     last_side = active_side
 
                 inference_started_at = time.perf_counter()
-                cls, detail, boxes = get_detections(
+                cls, detail, boxes, causes, defect_types = get_detections(
                     image,
                     engines[active_side],
                     empty_ref_gray,
                     thresholds[active_side],
+                    regions[active_side],
+                    embedding_model=embedding_model,
+                    reference=reference,
                 )
-                result = check_loop(cls, detail, boxes, image)
+                result = check_loop(
+                    cls, detail, boxes, image,
+                    causes=causes, defect_types=defect_types,
+                )
                 inference_ms = round(
                     (time.perf_counter() - inference_started_at) * 1000,
                     2,
@@ -248,7 +264,6 @@ def inspection_worker():
                         result.get("state") in ("PASS", "FAIL")
                         and confirmed_number > last_confirmed_check_number
                     )
-
                     if is_new_result:
                         inspection_id = save_inspection(
                             side=active_side,
@@ -262,6 +277,8 @@ def inspection_worker():
                             model_name=MODEL_NAME,
                             model_version=MODEL_VERSIONS[active_side],
                             inference_ms=inference_ms,
+                            causes=result.get("causes", []),
+                            defect_types=result.get("defect_types", []),
                         )
                         if result["state"] == "PASS":
                             inspection_stats["pass_count"] += 1
@@ -448,6 +465,8 @@ def stop_inspection():
             "message": "자동검사가 중단되었습니다.",
             "objecting_box": None,
             "bounding_box": None,
+            "causes": [],
+            "defect_types": [],
             "inspection_enabled": False,
         }
         return jsonify(dict(latest_result))
@@ -464,6 +483,8 @@ def start_inspection():
             "state": "INSPECTING",
             "result": None,
             "message": "자동검사를 재개했습니다.",
+            "causes": [],
+            "defect_types": [],
             "inspection_enabled": True,
         }
     inspection_enabled.set()
@@ -488,6 +509,8 @@ def change_inspection_side(side):
             "message": f"{side.upper()} 검사로 변경했습니다.",
             "objecting_box": None,
             "bounding_box": None,
+            "causes": [],
+            "defect_types": [],
         }
         return jsonify(dict(latest_result))
 

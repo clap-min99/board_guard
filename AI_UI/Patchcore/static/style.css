@@ -228,6 +228,7 @@ h1 {
 
 .result-panel {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 126px;
@@ -242,6 +243,21 @@ h1 {
 .result-value {
     font-size: clamp(27px, 2.1vw, 43px);
     font-weight: 400;
+}
+
+.defect-details {
+    margin-top: 12px;
+    font-size: 15px;
+    line-height: 1.7;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
+.spreadsheet-table td.defect-cell {
+    min-width: 150px;
+    max-width: 280px;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
 }
 
 .charts-top {

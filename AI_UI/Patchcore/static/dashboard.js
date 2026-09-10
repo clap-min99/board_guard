@@ -113,6 +113,18 @@ function formatHistoryNumber(value, digits) {
     return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
 }
 
+function defectEntries(data) {
+    const causes = Array.isArray(data.causes) ? data.causes : [];
+    const types = Array.isArray(data.defect_types) ? data.defect_types : [];
+    const boxes = Array.isArray(data.bounding_box) ? data.bounding_box : [];
+    const boxCount = boxes.length === 4 && boxes.every(value => typeof value === 'number') ? 1 : boxes.length;
+    return Array.from({ length: Math.max(causes.length, types.length, boxCount) }, (_, i) => ({
+        number: i + 1,
+        area: Array.isArray(causes[i]) && causes[i].length ? causes[i].join(', ') : '위치 미확인',
+        type: types[i] || '미분류'
+    }));
+}
+
 function renderHistoryRows(data) {
     historyBody.replaceChildren();
     for (const item of data.rows) {
@@ -122,6 +134,9 @@ function renderHistoryRows(data) {
         appendHistoryCell(row, Number.isNaN(date.getTime()) ? item.inspected_at : date.toLocaleString('ko-KR', { hour12: false }));
         appendHistoryCell(row, item.side.toUpperCase(), `spreadsheet-side ${item.side}`);
         appendHistoryCell(row, item.state, `spreadsheet-result ${item.state.toLowerCase()}`);
+        const defects = item.state === 'FAIL' ? defectEntries(item) : [];
+        appendHistoryCell(row, defects.map(d => `${d.number}. ${d.area}`).join('\n') || '—', 'defect-cell');
+        appendHistoryCell(row, defects.map(d => `${d.number}. ${d.type}`).join('\n') || '—', 'defect-cell');
         appendHistoryCell(row, formatHistoryNumber(item.score, 3), 'spreadsheet-number');
         appendHistoryCell(row, formatHistoryNumber(item.threshold, 2), 'spreadsheet-number');
         appendHistoryCell(row, `${formatHistoryNumber(item.inference_ms, 1)} ms`, 'spreadsheet-number');
@@ -130,7 +145,7 @@ function renderHistoryRows(data) {
     }
     if (!data.rows.length) {
         const row = document.createElement('tr');
-        appendHistoryCell(row, '저장된 검사 이력이 없습니다.', 'empty-row').colSpan = 8;
+        appendHistoryCell(row, '저장된 검사 이력이 없습니다.', 'empty-row').colSpan = 10;
         historyBody.appendChild(row);
     }
     const start = (data.page - 1) * data.page_size;
@@ -221,6 +236,11 @@ historyModal.addEventListener('close', () => {
 
 function displayInspectionResult(data) {
 const resultElement = document.getElementById('result-value');
+const detailElement = document.getElementById('defect-details');
+detailElement.hidden = data.state !== 'FAIL';
+detailElement.textContent = data.state === 'FAIL'
+    ? defectEntries(data).map(d => `불량 위치 ${d.number} · 부품: ${d.area} / 유형: ${d.type}`).join('\n') || '부품·불량 유형 정보가 없습니다.'
+    : '';
 
 switch (data.state) {
     case 'PASS':
@@ -397,7 +417,9 @@ async function toggleSide() {
             throw new Error(`검사 면 변경 실패: ${response.status}`);
         }
 
-        updateSideControl(await response.json());
+        const data = await response.json();
+        updateSideControl(data);
+        displayInspectionResult(data);
     } catch (error) {
         console.error(error);
         alert('검사 면을 변경하지 못했습니다.');
