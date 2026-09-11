@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.register_blueprint(history_api)
 
 # 핸드폰 카메라
-CAMERA_URL = "http://172.30.6.127:8080/video"
+CAMERA_URL = "http://192.168.9.228:8080/video"
 CAMERA_RETRY_INTERVAL = 2
 CAMERA_MAX_RETRIES = 3
 CAMERA_STALE_SECONDS = 3

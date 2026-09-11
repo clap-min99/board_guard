@@ -16,7 +16,7 @@ import time
 
 import cv2
 
-CAMERA_URL = "http://192.168.21.50:8080/video"   # 오늘 IP Webcam 주소로 수정
+CAMERA_URL = "http://192.168.9.228:8080/video"   # 오늘 IP Webcam 주소로 수정
 OUTPUT_PATH = "empty_reference.jpg"
 SPACE_KEY = ord(" ")
 

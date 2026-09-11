@@ -46,23 +46,7 @@ two_history = []
 moviing_to = []
 check_number = 0
 loop_count = 1
-# 컨베이어 제어 단계 (UI의 PASS/FAIL/MISSING 표시와 별개)
-WAIT_ENTRY = "WAIT_ENTRY"
-SETTLING = "SETTLING"
-VOTING = "VOTING"
-WAIT_EXIT = "WAIT_EXIT"
-_inspection_phase = WAIT_ENTRY
-_settle_until = 0.0
-_missing_since = None
-_position_empty_ref = None
-
-# 현장 조정값: x=좌우 이동, y=상하 이동. 좌표는 영상 크기 대비 비율.
-POSITION_AXIS = "x"
-TARGET_CENTER_MIN = 0.20
-TARGET_CENTER_MAX = 0.60
-STOP_SETTLE_SECONDS = 0.30
-EXIT_MISSING_SECONDS = 0.50
-GPIO_PULSE_SECONDS = 0.010
+_missing_check = 1    
 _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
 _inspection_state_lock = threading.RLock()
 _l_causes = []
@@ -72,9 +56,9 @@ INSPECTION_SESSION_ID = uuid.uuid4().hex
 
 
 GPIO.setmode(GPIO.BOARD)
-GPIO.setup(29, GPIO.OUT, initial=GPIO.LOW)
-GPIO.setup(31, GPIO.OUT, initial=GPIO.LOW)
-GPIO.setup(33, GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(29, GPIO.OUT)
+GPIO.setup(31, GPIO.OUT)
+GPIO.setup(33, GPIO.OUT)
 
 
 
@@ -107,7 +91,7 @@ REFERENCE_EMBEDDINGS_PATH = "reference_embeddings.pt"
 
 IMG_SIZE = 256
 
-CAMERA_URL = "http://10.212.29.23:8080/video"   # 오늘 IP Webcam 주소로 수정
+CAMERA_URL = "http://192.168.9.228:8080/video"   # 오늘 IP Webcam 주소로 수정
 
 FRONT_THRESHOLD = 0.55
 BACK_THRESHOLD = 0.4
@@ -163,103 +147,130 @@ def get_inspection_result(temp_list): #UI에서 호출 할 함수
 
     return answer
 
-def _send_gpio_pulse(pin):
-    GPIO.output(pin, GPIO.HIGH)
-    try:
-        time.sleep(GPIO_PULSE_SECONDS)
-    finally:
-        GPIO.output(pin, GPIO.LOW)
-
-
 def _check_loop_unlocked(cls, detail, boxes, frame, causes=None, defect_types=None):
-    """중앙 도착 -> STOP 1회 -> 안정화 -> 투표 -> 결과 1회 -> 이탈 대기."""
-    global _inspection_phase, _settle_until, _missing_since
-    global _l_temp, _l_causes, _l_defect_types, check_number
+    """투표 상태 잠금을 획득한 상태에서 호출하는 내부 판정 함수."""
+    global loop_count
 
-    now = time.monotonic()
+    global _l_class
+    global _l_detail
+    global _l_bounding_box
+    global _l_temp
+    global one_history
+    global one_history_detail
+    global one_history_obox
+    global one_history_bbox
+    global check_number
+    global _l_state
+    global _l_state_detail
+    global _l_state_bbox
+    global _missing_check
+    global _l_object_box
+    global _l_causes, _l_defect_types
 
-    # 확정 후에는 위치/판정을 갱신하지 않고 실제 이탈만 확인한다.
-    if _inspection_phase == WAIT_EXIT:
-        if cls == "MISSING":
-            if _missing_since is None:
-                _missing_since = now
-            elif now - _missing_since >= EXIT_MISSING_SECONDS:
-                _inspection_phase = WAIT_ENTRY
-                _missing_since = None
-                one_history.clear()
+    try:
+            # 여기서부터 시작임 
+
+            # PCB 존재 판단
+            _l_class = cls
+            _l_detail = detail
+            _l_bounding_box = boxes
+            _l_object_box = None
+            #_l_class, _l_detail, _l_object_box, _l_bounding_box = get_detections() # 저거 받아다 써야됨
+
+            # 상태를 가지고 있어야함 PASS, FAIL, MISSING, INSPECTING
+            
+            # 여러 프레임 받아서 결과값 확정 처리하기 60fps마다 갱신하는거임. 
+
+            # 상태머신으로 만들기 위한 조건 
+            # _l_state이 PASS와 FAIL 이되면 투표를 하면 안됨. 분기 조건을 정하자
+            # _l_state이 INSPECTING 일때는 해도됨, MISSING 일 땐 해도 됨
+            # 상태조건
+            # MISSING -> INSPECTING -> PASS -> MISSING
+            #                       -> FAIL ┘
+            # 화면에 아무것도 안잡혀서 빈 리스트가 넘어올떄 미싱상태임. 
+            # 지금 유사 상태머신임.
+            if _l_class == "MISSING":
+                GPIO.output(33, GPIO.HIGH)
+                GPIO.output(33, GPIO.LOW)   
                 _l_causes = []
                 _l_defect_types = []
                 _l_temp = ["MISSING", None, "MISSING", None, None, None, check_number]
-        else:
-            _missing_since = None
-    else:
-        pcb_box = None
-        if cls != "MISSING" and _position_empty_ref is not None:
-            pcb_box = detect_pcb_box(frame, _position_empty_ref)
-
-        if _inspection_phase == WAIT_ENTRY:
-            _l_causes = []
-            _l_defect_types = []
-            _l_temp = ["MISSING", None, "PCB 진입 대기", None, pcb_box, None, check_number]
-            if pcb_box is not None:
-                x1, y1, x2, y2 = pcb_box
-                height, width = frame.shape[:2]
-                if POSITION_AXIS == "x":
-                    center = (x1 + x2) / (2.0 * width)
-                    fully_inside = x1 > 0 and x2 < width
-                else:
-                    center = (y1 + y2) / (2.0 * height)
-                    fully_inside = y1 > 0 and y2 < height
-                #if fully_inside and TARGET_CENTER_MIN <= center <= TARGET_CENTER_MAX:
-                if TARGET_CENTER_MIN <= center <= TARGET_CENTER_MAX:    
-                    _inspection_phase = SETTLING
-                    one_history.clear()
-                    _send_gpio_pulse(29)
-                    _settle_until = time.monotonic() + STOP_SETTLE_SECONDS
-                    _l_temp = ["INSPECTING", None, "정지 안정화", None, pcb_box, None, check_number]
-
-        elif _inspection_phase == SETTLING:
-            if now >= _settle_until:
-                _inspection_phase = VOTING
                 one_history.clear()
+                #one_history_detail.clear()
+                #one_history_bbox.clear()
+                #one_history_obox.clear()
+                _missing_check = 1
 
-        elif _inspection_phase == VOTING:
-            if cls == "MISSING":
-                # 이미 벨트를 멈췄으므로 진입 대기로 돌아가거나 STOP을 재송신하지 않는다.
-                one_history.clear()
-                _l_temp = ["INSPECTING", None, "PCB 재검출 대기", None, None, None, check_number]
-            elif cls in ("PASS", "FAIL"):
-                one_history.append(cls)
-                voted = state_vote(one_history)
-                _l_causes = [list(names) for names in (causes or [])] if voted != "PASS" else []
-                _l_defect_types = list(defect_types or []) if voted != "PASS" else []
-                _l_temp = ["INSPECTING", None, "INSPECTING", detail, pcb_box, boxes, check_number]
-                if voted in ("PASS", "FAIL"):
-                    # 저장 중 예외가 발생하더라도 같은 PCB에 다시 송신하지 않는다.
-                    _inspection_phase = WAIT_EXIT
-                    _missing_since = None
-                    check_number += 1
-                    _l_temp = [voted, "NORMAL" if voted == "PASS" else "DEFECT",
-                               voted, detail, pcb_box, boxes, check_number]
-                    _send_gpio_pulse(33 if voted == "PASS" else 31)
-                    directory = OUTPUT_DIR_PASS if voted == "PASS" else OUTPUT_DIR_FAIL
-                    os.makedirs(directory, exist_ok=True)
-                    output_path = os.path.join(directory, get_inspection_image_filename(check_number, voted))
-                    saved_frame = frame
-                    if voted == "FAIL":
+
+            # 뭔가 넘어왔음.
+            else :
+                if _missing_check == 1: #
+                    # 3개다 판단해서 가장 많이 되는걸로 뽑아다 주기
+                    # 미싱은 앞에서 처리했으니 성공 실패 검사중만 체크하면 됨.
+                    one_history.append(_l_class)           
+
+                    _l_state = state_vote(one_history)
+                    # 박스와 같은 프레임의 정보를 보관하고 확정 후에는 유지한다.
+                    _l_causes = [list(names) for names in (causes or [])] if _l_state != "PASS" else []
+                    _l_defect_types = list(defect_types or []) if _l_state != "PASS" else []
+
+                    print(_l_state)
+                    if _l_state == "PASS": # 정상 검출 됬음.
+                        GPIO.output(33, GPIO.HIGH)
+                        GPIO.output(33, GPIO.LOW)                    
+                        check_number += 1
+
+                        FILE_NAME = get_inspection_image_filename(check_number, "PASS")
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_PASS,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR_PASS, exist_ok=True)
+                        saved = cv2.imwrite(OUTPUT_PATH, frame)
+
+                        _l_temp = ["PASS", "NORMAL", "PASS", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        _missing_check = 0
+                        print(get_inspection_result(_l_temp))
+                    elif _l_state == "FAIL": # 비정상이래요.
+                        check_number += 1
+                        #불량품 판정
+                        GPIO.output(31, GPIO.HIGH)
+                        GPIO.output(31, GPIO.LOW)
+                        FILE_NAME = get_inspection_image_filename(check_number, "FAIL")
+                        OUTPUT_PATH = os.path.join(OUTPUT_DIR_FAIL,FILE_NAME)
+                        os.makedirs(OUTPUT_DIR_FAIL, exist_ok=True)
+
                         saved_frame = frame.copy()
-                        draw_inspection_boxes(saved_frame, {
-                            "state": "FAIL", "objecting_box": pcb_box,
-                            "bounding_box": boxes, "causes": _l_causes,
-                            "defect_types": _l_defect_types,
-                        })
-                    cv2.imwrite(output_path, saved_frame)
-                    print(get_inspection_result(_l_temp))
+                        draw_inspection_boxes(
+                            saved_frame,
+                            {
+                                "state": "FAIL",
+                                "objecting_box": _l_object_box,
+                                "bounding_box": _l_bounding_box,
+                                "causes": _l_causes,
+                                "defect_types": _l_defect_types,
+                            },
+                        )
+                        saved = cv2.imwrite(OUTPUT_PATH, saved_frame)
+                        
+                        _l_temp = ["FAIL", "DEFECT", "FAIL", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                        _missing_check = 0
+                        print(get_inspection_result(_l_temp))
+                    elif _l_state == "INSPECTING": # 검사중 이래요
+                            # 검사 시작한순간 멈추게 하기.
+                            GPIO.output(29, GPIO.HIGH)
+                            GPIO.output(29, GPIO.LOW)
+                            _l_temp = ["INSPECTING", None, "INSPECTING", _l_detail, _l_object_box, _l_bounding_box, check_number]
+                            print(get_inspection_result(_l_temp))
+                else:
+                    pass
 
-    result = get_inspection_result(_l_temp)
-    result["causes"] = [list(names) for names in _l_causes]
-    result["defect_types"] = list(_l_defect_types)
-    return result
+            # 검사 상태 관리 및 결과 확정 / get_inspection_result(_l_temp) 호출하면 원하는 answer나오게하기
+            result = get_inspection_result(_l_temp)
+            result["causes"] = [list(names) for names in _l_causes]
+            result["defect_types"] = list(_l_defect_types)
+            return result
+            
+
+    finally:
+        pass
 
 
 def check_loop(cls, detail, boxes, frame, causes=None, defect_types=None):
@@ -270,7 +281,7 @@ def check_loop(cls, detail, boxes, frame, causes=None, defect_types=None):
 
 def reset_inspection_state():
     """누적 통계는 유지하고 현재 PCB의 투표 및 확정 상태만 초기화한다."""
-    global _inspection_phase, _settle_until, _missing_since, _l_temp
+    global _missing_check, _l_temp
     global _l_class, _l_detail, _l_bounding_box, _l_object_box
     global _l_causes, _l_defect_types
 
@@ -286,9 +297,7 @@ def reset_inspection_state():
         _l_detail = None
         _l_bounding_box = None
         _l_object_box = None
-        _inspection_phase = WAIT_ENTRY
-        _settle_until = 0.0
-        _missing_since = None
+        _missing_check = 1
         _l_causes = []
         _l_defect_types = []
         _l_temp = [
@@ -322,7 +331,6 @@ def frame_reader(cap: cv2.VideoCapture) -> None:
 # ============================================================
 
 def load_empty_reference(path: str, size: int = 256) -> np.ndarray:
-    global _position_empty_ref
     ref = cv2.imread(path)
     if ref is None:
         raise RuntimeError(
@@ -330,8 +338,7 @@ def load_empty_reference(path: str, size: int = 256) -> np.ndarray:
         )
     ref = cv2.resize(ref, (size, size))
     ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
-    _position_empty_ref = cv2.GaussianBlur(ref_gray, (5, 5), 0)
-    return _position_empty_ref
+    return cv2.GaussianBlur(ref_gray, (5, 5), 0)
 
 
 def check_presence(frame_bgr: np.ndarray, empty_ref_gray: np.ndarray) -> tuple[bool, float]:
