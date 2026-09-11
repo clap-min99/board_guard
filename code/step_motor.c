@@ -4,7 +4,7 @@
 
 #define STEP_PIN    6   /* PA6 -> PUL+ */
 #define DIR_PIN     7   /* PA7 -> DIR+ */
-#define MOTOR_SPEED 800 /* LOW -> HIGH SPEED */
+#define MOTOR_SPEED 1200 /* LOW -> HIGH SPEED */
 
 
 static volatile unsigned int pulse_state;

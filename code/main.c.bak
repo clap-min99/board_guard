@@ -14,6 +14,7 @@ static void Sys_Init(int baud)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	EventQueue_Init();
 	Sensor_Control_Init();
+	Step_Motor_Run();
 	_state_machine_init();
 }
 
