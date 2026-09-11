@@ -1,0 +1,8 @@
+#ifndef STEP_MOTOR2_H
+#define STEP_MOTOR2_H
+
+void Step_Motor2_Init(void);
+void step_motor2_control(int position_percent);
+int Step_Motor2_Is_Moving(void);
+
+#endif

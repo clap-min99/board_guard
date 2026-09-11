@@ -1,0 +1,126 @@
+#include "device_driver.h"
+#include "step_motor2.h"
+
+/* 28BYJ-48 등 감속기 탑재 스텝모터 기준 (1회전 = 4096 하프스텝) */
+#define STEPS_PER_REVOLUTION 4096
+
+static volatile int step_current;     /* 현재 위치 (스텝 수) */
+static volatile int step_target;      /* 목표 위치 (스텝 수) */
+static volatile unsigned int step_phase; /* 하프스텝 시퀀스 인덱스 (0~7) */
+
+/* 8단계 하프스텝  시퀀스 */
+/*
+16진수 값,2진수 비트 (IN4 IN3 IN2 IN1),켜지는 코일(상),	동작 방식
+0x8,	1 0 0 0,					IN4만 ON,		1상 여자 (1개만 켬)
+0xc,	1 1 0 0,					IN4, IN3 ON,	2상 여자 (2개 켬)
+0x4,	0 1 0 0,					IN3만 ON,		1상 여자
+0x6,	0 1 1 0,					IN3, IN2 ON,	2상 여자
+0x2,	0 0 1 0,					IN2만 ON,		1상 여자
+0x3,	0 0 0 1,					IN2, IN1 ON,	2상 여자
+0x1,	0 0 0 1,					IN1만 ON,		1상 여자
+0x9,	1 0 0 1,					IN4, IN1 ON,	2상 여자
+*/
+static const unsigned char half_step[8] = {
+    0x8, 0xc, 0x4, 0x6, 0x2, 0x3, 0x1, 0x9
+};
+
+/* 
+ * 모터 상(Phase) 신호 출력
+ * - Bit 3: IN4 (PC7)
+ * - Bit 2: IN3 (PB6)
+ * - Bit 1: IN2 (PA7)
+ * - Bit 0: IN1 (PA6)
+ */
+static void Step_Write(unsigned int pattern)
+{
+    GPIOC->BSRR = (pattern & 0x8U) ? (1U << 7) : (1U << (7 + 16));
+    GPIOB->BSRR = (pattern & 0x4U) ? (1U << 6) : (1U << (6 + 16));
+    GPIOA->BSRR = (pattern & 0x2U) ? (1U << 7) : (1U << (7 + 16));
+    GPIOA->BSRR = (pattern & 0x1U) ? (1U << 6) : (1U << (6 + 16));
+}
+
+/* 스텝모터 GPIO 및 주기 제어용 TIM4 타이머 초기화 */
+void Step_Motor_Init(void)
+{
+    /* GPIOA, GPIOB, GPIOC 클록 공급 */
+    Macro_Set_Bit(RCC->AHB1ENR, 0);
+    Macro_Set_Bit(RCC->AHB1ENR, 1);
+    Macro_Set_Bit(RCC->AHB1ENR, 2);
+
+    /* GPIO 출력 모드(Push-Pull) 설정 */
+    Macro_Write_Block(GPIOC->MODER, 0x3, 0x1, 14); /* PC7 (IN4) */
+    Macro_Write_Block(GPIOB->MODER, 0x3, 0x1, 12); /* PB6 (IN3) */
+    Macro_Write_Block(GPIOA->MODER, 0xf, 0x5, 12); /* PA6 (IN1), PA7 (IN2) */
+    
+    Macro_Clear_Bit(GPIOC->OTYPER, 7);
+    Macro_Clear_Bit(GPIOB->OTYPER, 6);
+    Macro_Clear_Bit(GPIOA->OTYPER, 6);
+    Macro_Clear_Bit(GPIOA->OTYPER, 7);
+
+    /* 모터 모든 상 Off (초기 발열 방지) */
+    Step_Write(0);
+
+    /* TIM4 타이머 설정: 2ms 주기 인터럽트 (스텝당 2ms 소요) */
+    Macro_Set_Bit(RCC->APB1ENR, 2);                 /* TIM4 클록 Enable */
+    TIM4->CR1 = 0;
+    TIM4->PSC = (TIMXCLK / 1000000U) - 1U;          /* 1us 타이머 카운트 단위 */
+    TIM4->ARR = 2000U - 1U;                         /* 2000us = 2ms 마다 인터럽트 발생 */
+    TIM4->DIER = 1U;                                /* Update Interrupt Enable */
+    TIM4->SR = 0;
+    TIM4->EGR = 1U;                                 /* 설정값 적용을 위한 Update Generation */
+
+    NVIC_ClearPendingIRQ(TIM4_IRQn);
+    NVIC_EnableIRQ(TIM4_IRQn);
+
+    /* 모터 상태 변수 초기화 */
+    step_current = 0;
+    step_target = 0;
+    step_phase = 0;
+}
+
+/* 백분율(0~100%) 기반 목표 위치 설정 */
+void step_motor_control(int position_percent)
+{
+    /* 입력값 예외 처리 (0~100% 범위 밖 제한) */
+    if (position_percent < 0) position_percent = 0;
+    if (position_percent > 100) position_percent = 100;
+
+    /* 목표 백분율을 스텝 수로 변환 */
+    step_target = (position_percent * STEPS_PER_REVOLUTION) / 100;
+
+    /* 이동할 스텝이 남아있으면 타이머를 켜서 모터 구동 시작 */
+    if (step_target != step_current) {
+        TIM4->CNT = 0;
+        TIM4->SR = 0;
+        Macro_Set_Bit(TIM4->CR1, 0); /* TIM4 Enable */
+    }
+}
+
+/* 모터가 현재 구동 중인지 여부 확인 */
+int Step_Motor_Is_Moving(void)
+{
+    return step_current != step_target;
+}
+
+/* TIM4 인터럽트: 2ms마다 호출되며 1스텝씩 모터 이동 */
+void TIM4_IRQHandler(void)
+{
+    /* Update Interrupt Flag 확인 */
+    if ((TIM4->SR & 1U) == 0U) return;
+    TIM4->SR = ~1U; /* 플래그 클리어 */
+
+    if (step_current < step_target) {
+        /* 정방향 회전 */
+        Step_Write(half_step[step_phase]);
+        step_phase = (step_phase + 1U) & 7U; /* 0~7 순환 */
+        ++step_current;
+    } else if (step_current > step_target) {
+        /* 역방향 회전 */
+        step_phase = (step_phase - 1U) & 7U; /* 0~7 순환 */
+        Step_Write(half_step[step_phase]);
+        --step_current;
+    } else {
+        /* 목표 위치 도착 시 타이머 중지 (마지막 페이즈 유지하여 정지 토크 확보) */
+        Macro_Clear_Bit(TIM4->CR1, 0);
+    }
+}
