@@ -30,9 +30,9 @@
 | 이름 | GitHub | 담당 |
 | --- | --- | --- |
 | 박수민 | [박수민_GITHUB](https://github.com/clap-min99) | 팀장, AI 모델링 |
-| 김태환 | [김태환_GITHUB](https://github.com/Tae86) | AI 파이프라인, 기구물 |
-| 곽혜민 | [곽혜민_GITHUB](https://github.com/hyehye12) | UI/UX, DB |
-| 이양배 | [이양배_GITHUB](https://github.com/twotwoship) | 판정 로직, mcu 제어 |
+| 김태환 | [김태환_GITHUB](https://github.com/Tae86) | 팀원, AI 파이프라인, 기구물 |
+| 곽혜민 | [곽혜민_GITHUB](https://github.com/hyehye12) | 팀원, UI/UX, DB |
+| 이양배 | [이양배_GITHUB](https://github.com/twotwoship) | 팀원, 판정 로직, mcu 제어 |
 
 ## 개발 목표
 
