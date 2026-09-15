@@ -50,7 +50,7 @@
 | 불량 위치 시각화 | anomaly map → contour 분석으로 결함 부위 bounding box 표시 |
 | 불량 유형 분류 | 결함 crop 이미지를 임베딩으로 변환해 레퍼런스와 1-NN 매칭 → 불량 원인(유형) 추정 |
 | 앞/뒷면 개별 모델 운용 | Front/Back 각각 별도 PatchCore 모델 + threshold(0.55 / 0.4) 적용 |
-| 병행 실험 트랙 | PatchCore 외 YOLO Classification 기반 검사(웹 대시보드)도 별도 검증 |
+| 병행 실험 트랙 | PatchCore 외 Classification 기반 검사(웹 대시보드) 별도 검증 |
 | Jetson-MCU 이벤트 연동 | GPIO 3라인(STOP/PASS/FAIL)으로 Jetson 판정 결과를 MCU 상태머신에 전달 |
 | 상태머신 기반 배출 제어 | 스텝모터 이송 + 연속회전 서보 push 시퀀스로 불량품 자동 배출 |
 
@@ -149,11 +149,7 @@ board_guard/
 │   │   ├── embedding_utils.py
 │   │   ├── database.py                 # 판정 결과 기록
 │   │   └── drawing.py                  # 검사 영역/결과 시각화
-│   │
-│   └── Yolo/                    # YOLO 분류 기반 검사 (병행 트랙)
-│       ├── PCB_BG_full.py              # Flask 웹 대시보드 메인
-│       ├── get_detections_demo.py      # 판정 + 위치정보 계산
-│       └── best.pt                     # 학습된 YOLO 분류 모델
+|
 │
 ├── code/                         # M4 NUCLEO-64 펌웨어 (STM32F411RE)
 │   ├── main.c                          # 메인 루프 / 이벤트 디스패치
