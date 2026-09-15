@@ -162,9 +162,89 @@ board_guard/
 └── refer/                        # STM32F411RE 데이터시트, 레퍼런스 매뉴얼
 ```
 
+## 실행 방법
+ 
+전체 셋업(휴대폰 카메라 연결, onnx→engine 변환, MCU 빌드/플래시, Jetson↔M4 연결까지)은 [Porting_Manual.md](./Porting_Manual.md) 참고
+
+
 ## 구현 검증
-
-| 시험 항목 | 판정 기준 | 결과 |
-| --- | --- | --- |
-
-
+ 
+최종 채택 모델: `model_03` (backbone: wide_resnet50_2)
+ 
+| 모델 | 학습 데이터 | AUROC | F1 | Threshold |
+| --- | --- | --- | --- | --- |
+| model_03_front | 벨트 정상 479장 / 불량 50장 | 1.0 | 1.0 | 0.55 |
+| model_03_back | 벨트 정상 489장 / 불량 63장 | 0.999 | 1.0 | 0.4 |
+ 
+- 박스 기구물 검증 단계를 마치고 컨베이어 벨트 실환경에서 최종 검증 완료
+- 다양한 결함 유형(SOLDER_DEFECT, SCRATCH, IC_DAMAGED, CRYSTAL_MISSING 등 총 12종)에 대해 위치·유형 판정이 안정적으로 동작함을 실제 검출 결과로 확인
+- AUROC: 정상/불량 구분 성능 지표(1에 가까울수록 우수) · F1: 정밀도와 재현율의 조화 평균 · Threshold: PASS/FAIL 판별 기준 점수
+## 트러블슈팅
+ 
+### 1. 카메라 프레임 지연 (3초 이상 딜레이)
+ 
+**문제**: engine 로드 후 화면을 켜면 3초 이상 지연이 발생.
+ 
+**원인**: `cv2.VideoCapture`가 IP Webcam 스트림에서 프레임을 계속 받는 중에도, 메인 루프가 추론이 끝날 때까지 `cap.read()`를 호출하지 않아 내부 버퍼에 읽지 않은 프레임이 계속 쌓임. 결과적으로 매 추론마다 몇 초 전 프레임을 처리하게 되어 지연이 누적됨.
+ 
+```python
+# 기존 코드 — 추론이 끝나야 다음 프레임을 읽음
+while True:
+    ok, frame = cap.read()
+    cls, detail, boxes = get_detections_front(frame)  # 추론이 여기서 시간 소모
+```
+ 
+**해결**: 프레임 수신을 별도 스레드로 분리해 항상 최신 프레임(`latest_frame`)만 유지하고, 메인 루프(추론)는 그 값을 그대로 가져다 씀. 추론이 아무리 오래 걸려도 지연이 누적되지 않음.
+ 
+```python
+latest_frame = None
+frame_lock = threading.Lock()
+ 
+def frame_reader(cap):
+    global latest_frame
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        with frame_lock:
+            latest_frame = frame  # 항상 가장 최근 프레임으로 덮어씀
+ 
+threading.Thread(target=frame_reader, args=(cap,), daemon=True).start()
+ 
+while True:
+    with frame_lock:
+        frame = latest_frame
+    cls, detail, boxes = get_detections_front(frame)
+```
+ 
+### 2. Jetson–M4 GPIO 노이즈 (인접 핀 오인식)
+ 
+**문제**: Jetson이 PC11(PASS) 한 핀만 HIGH로 보냈는데, M4에서 인접 핀인 PC10(STOP)·PC12(FAIL)까지 함께 HIGH로 인식되어 3개 핀 모두 인터럽트가 발생.
+ 
+**원인**: Jetson 단독으로 신호를 발생시켰을 때는 문제가 없었음 → M4에 연결된 스텝모터/서보모터 및 모터드라이버에서 발생한 노이즈가 신호선에 유입되는 것으로 확인.
+ 
+**해결**: Jetson–M4 신호선 구간에 **10kΩ 저항**을 추가해 노이즈를 억제, 오인식 해결.
+ 
+### 3. PCB 부분 인식 오판정
+ 
+**문제**: 컨베이어로 PCB가 이송되는 도중, 카메라 중앙에 도달하기 전 일부만 진입한 상태에서도 PCB로 인식해 정지·FAIL 판정이 반복 발생.
+ 
+**원인**: 배경과의 밝기 차이가 일정 기준을 넘는 픽셀 비율만으로 물체 존재를 판단하던 기존 로직의 한계 — PCB가 화면에 얼마나 들어와 있는지는 고려하지 않음.
+ 
+**해결**: PCB 인식 박스의 **중심 좌표가 지정 구간에 도달했을 때만** 정지·판정하도록 구조 변경. PCB가 카메라에 완전히 들어왔을 때만 검사가 트리거됨.
+ 
+### 4. 결함 위치 박스 흔들림 (flickering)
+ 
+**문제**: 실시간 스트림에서 결함 bounding box의 위치·개수가 프레임마다 계속 바뀌어 결과가 불안정하게 보임.
+ 
+**원인**: 매 프레임 독립적으로 threshold를 적용해 anomaly map으로부터 박스를 새로 계산하는 구조라, 미세한 score 변동에도 박스가 생겼다 사라졌다 함.
+ 
+**해결**: 실시간 프레임 단위 판정 대신, **FAIL 판정이 확정된 순간의 단일 프레임을 캡처**해 그 프레임 기준으로 결함 위치를 고정 판별하도록 구조 변경.
+ 
+### 5. GPIO 신호 중복 송신
+ 
+**문제**: 판정 진행 중 및 완료 후에도 동일한 판정 신호가 여러 번 반복 송신되어 M4 쪽에서 중복 인터럽트 발생.
+ 
+**원인**: Jetson 측 판정 결과 송신 로직이 여러 시점에서 같은 신호를 계속 재전송하는 구조였음.
+ 
+**해결**: 판정 로직을 단계별로 분리해 신호가 **정확히 1회만 전송**되도록 수정.
